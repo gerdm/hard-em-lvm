@@ -8,82 +8,6 @@ from typing import Callable
 from tensorflow_probability.substrates import jax as tfp
 tfd = tfp.distributions
 
-class IPL:
-    def __init__(self, prior_mu, prior_Sigma, decoder, n_iterations=1):
-        self.prior_mu = prior_mu
-        self.prior_Sigma = prior_Sigma
-        self.decoder = decoder
-        self.num_iterations = n_iterations
-        self.dim_obs = decoder.dim_full
-        self.dim_latent = decoder.dim_latent
-        self.num_is_samples = 13
-        
-    @partial(jax.jit, static_argnums=(0,))
-    def lin_predict(self, mu, Sigma, params):
-        m, logPsi = self.decoder.apply(params, mu)
-        G = jax.jacfwd(lambda x: self.decoder.apply(params, x)[0])(mu)
-        Psi = jnp.exp(logPsi) * jnp.eye(self.dim_obs)
-        
-        S = jnp.einsum("im,mk,jk->ij", G, Sigma, G)
-        S = S + Psi
-        C = Sigma @ G.T
-        
-        return m, S, C
-
-    
-    def gauss_condition(self, mu_prev, Sigma_prev, y, m, S, C):
-        K = jnp.linalg.solve(S, C.T).T
-        mu_est = mu_prev + K @ (y - m)
-
-        Sigma_est = jnp.einsum("im,mk,jk->ij", K, S, K)
-        Sigma_est = Sigma_prev - Sigma_est
-
-        return mu_est, Sigma_est
-    
-    
-    def iterate_posterior_step(self, state, y, params):
-        """
-        Iterate posterior step
-        """
-        mu, Sigma = state
-        m, S, C = self.lin_predict(mu, Sigma, params)
-        mu_est, Sigma_est = self.gauss_condition(mu, Sigma, y, m, S, C)
-        new_state = (mu_est, Sigma_est)
-        return new_state, None
-    
-    
-    def estimate_posterior_params(self, y, params):
-        state = (self.prior_mu, self.prior_Sigma)
-        ips = partial(self.iterate_posterior_step, params=params)
-        
-        # lax.scan makes it painfully slow
-        for it in range(self.num_iterations):
-            state, _ = ips(state, y)
-            
-        post_mu, post_Sigma = state
-        return post_mu, post_Sigma
-    
-
-    @partial(jax.jit, static_argnums=(0,))
-    def compute_iwlmm_single(self, key, obs, params):
-        mu, Sigma = self.estimate_posterior_params(obs, params)
-        dist_posterior_latent = distrax.MultivariateNormalFullCovariance(mu, Sigma)
-        dist_prior_latent = distrax.MultivariateNormalFullCovariance(self.prior_mu, self.prior_Sigma)
-
-        is_samples = dist_posterior_latent.sample(seed=key, sample_shape=self.num_is_samples)
-        
-        mean_x, logvar_x = self.decoder.apply(params, is_samples)
-        cov_x = jax.vmap(jnp.diag)(jnp.exp(logvar_x / 2))
-        # cov_x = jnp.exp(logvar_x) * jnp.eye(self.dim_obs)
-        
-        dist_decoder = distrax.MultivariateNormalFullCovariance(mean_x, cov_x)
-
-        log_is = (dist_decoder.log_prob(obs)
-                + dist_prior_latent.log_prob(is_samples)
-                - dist_posterior_latent.log_prob(is_samples))
-        
-        return jax.nn.logsumexp(log_is, b=1/self.num_is_samples)
-
 
 class Encoder(nn.Module):
     """
@@ -283,7 +207,7 @@ def iwae(params, model, X_batch, key, num_is_samples=13):
     std_x = jnp.exp(logvar_x / 2)
     
     dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(model.latent_dim), jnp.ones(model.latent_dim))
-    dist_decoder = distrax.MultivariateNormalDiag(mean_x, std_x[..., None] * jnp.ones(model.full_dim))
+    dist_decoder = distrax.MultivariateNormalDiag(mean_x, std_x)
     dist_posterior = distrax.Normal(mean_z[:, None, :], std_z[:, None, :])
     
     log_prob_z_prior = dist_prior.log_prob(z)
