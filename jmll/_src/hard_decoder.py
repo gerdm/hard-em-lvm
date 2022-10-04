@@ -37,7 +37,7 @@ def epoch_step(params_decoder, z_est, opt_states, observations, tx, lossfn, mode
     
     # M-step
     for i in range(n_its):
-        nll, grad_theta = grad_m(params_decoder, z_est, observations, model)
+        grad_theta = grad_m(params_decoder, z_est, observations, model)
         updates, opt_params_state = tx.update(grad_theta, opt_params_state, params_decoder)
         params_decoder = optax.apply_updates(params_decoder, updates)
 
@@ -46,7 +46,7 @@ def epoch_step(params_decoder, z_est, opt_states, observations, tx, lossfn, mode
     return nll, params_decoder, z_est, new_states
 
 
-def train_epoch_full(key, X, model, tx, dim_latent, lossfn, n_its, n_epochs):
+def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_epochs):
     """
     Train a full-batch hard-EM latent variable model of the form
     p(x, z) = p(x|z) p(z) = N(x|f(z), sigma^2 I) N(z|0, I),
@@ -56,7 +56,7 @@ def train_epoch_full(key, X, model, tx, dim_latent, lossfn, n_its, n_epochs):
     ----------
     key: jax.random.PRNGKey
         Random number generator key
-    X: jnp.ndarray
+    observations: jnp.ndarray
         Data matrix of shape (n_samples, n_features)
     model: flax.nn.Module
         Decoder model (input z, output x)
@@ -74,12 +74,13 @@ def train_epoch_full(key, X, model, tx, dim_latent, lossfn, n_its, n_epochs):
     n_epochs: int
         Number of epochs to train for
     """
-    opt_states, target_states = initialise_epoch(key, model, tx, X, dim_latent)
+    opt_states, target_states = initialise_epoch(key, model, tx, observations, dim_latent)
     params_decoder, z_decoder = target_states
 
     part_step = jax.jit(partial(epoch_step,
                                 tx=tx, n_its=n_its, 
                                 lossfn=lossfn,
+                                observations=observations,
                                 model=model))
     nll_hist = []
     for e in tqdm(range(n_epochs)):
