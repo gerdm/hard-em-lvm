@@ -111,7 +111,6 @@ def loss_hard_nmll(params, z_batch, X_batch, model):
     model: flax.nn.Module
         Decoder model (input z, output x)
     """
-    batch_size = len(X_batch)
     dim_latent = model.dim_latent
     
     mean_x, logvar_x = model.apply(params, z_batch)
