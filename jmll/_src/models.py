@@ -1,6 +1,7 @@
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
+from typing import Callable
 
 
 class FADecoder(nn.Module):
