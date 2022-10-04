@@ -121,3 +121,29 @@ class EncoderFullCov(nn.Module):
         Lz = jax.vmap(vae.fill_lower_tri, (0, None))(Lz, self.latent_dim)
 
         return mean_z, Lz + diag_z
+
+
+class VAE_IW(nn.Module):
+    """
+    Importance-Weighted Variational Autoencoder
+    """
+    latent_dim: int
+    obs_dim: int
+    Encoder: nn.Module
+    Decoder: nn.Module
+    
+    def reparameterise(self, key, mean, logvar, num_samples=1):
+        std = jnp.exp(logvar / 2)
+        eps = jax.random.normal(key, (num_samples, *logvar.shape))
+        z = mean[None, ...] + jnp.einsum("...d,...d->...d", std, eps)
+        return z
+    
+    def setup(self):
+        self.encoder = self.Encoder(self.latent_dim)
+        self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
+    
+    def __call__(self, x, key_eps, num_samples=1):
+        mean_z, logvar_z = self.encoder(x)
+        z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
+        mean_x, logvar_x = self.decoder(z)
+        return z, (mean_z, logvar_z), (mean_x, logvar_x)
