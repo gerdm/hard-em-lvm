@@ -23,22 +23,25 @@ def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
     return opt_states, target_states
 
 
-@partial(jax.jit, static_argnames=("tx_params", "tx_latent", "n_its", "lossfn", "model"))
+@partial(jax.jit, static_argnames=("tx_params", "tx_latent",
+                                   "n_its_params", "n_its_latent",
+                                   "lossfn", "model"))
 def train_step(params_decoder, z_est, opt_states, observations,
-               tx_params, tx_latent, lossfn, model, n_its=1):
+               tx_params, tx_latent, n_its_params, n_its_latent,
+                lossfn, model):
     opt_latent_state, opt_params_state = opt_states
 
     grad_e = jax.grad(lossfn, argnums=1)
     grad_m = jax.grad(lossfn, argnums=0)
     
     # E-step
-    for i in range(n_its):
+    for i in range(n_its_latent):
         grad_z = grad_e(params_decoder, z_est, observations, model)
         updates, opt_latent_state = tx_latent.update(grad_z, opt_latent_state, z_est)
         z_est = optax.apply_updates(z_est, updates)
     
     # M-step
-    for i in range(n_its):
+    for i in range(n_its_params):
         grad_theta = grad_m(params_decoder, z_est, observations, model)
         updates, opt_params_state = tx_params.update(grad_theta, opt_params_state, params_decoder)
         params_decoder = optax.apply_updates(params_decoder, updates)
@@ -55,7 +58,8 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     where sigma^2  is a vector of diagonal elements of the covariance matrix.
 
     In this implementation, we consider a single optimiser for both the
-    parameters and the latent variables.
+    parameters and the latent variables. We also consider the same
+    number of iterations for both the E-step and the M-step.
 
     Parameters
     ----------
@@ -86,8 +90,9 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     nll_hist = []
     for e in tqdm(range(n_epochs)):
         res = train_step(params_decoder, z_decoder, opt_states,
-                        tx_params=tx, tx_latent=tx, n_its=n_its, lossfn=lossfn,
-                        model=model, observations=observations)
+                        tx_params=tx, tx_latent=tx,
+                        n_its_params=n_its, n_its_latent=n_its,
+                        lossfn=lossfn, model=model, observations=observations)
         nll, params_decoder, z_decoder, opt_states = res
         nll_hist.append(nll.item())
         print(f"{nll:0.4e}", end="\r")
