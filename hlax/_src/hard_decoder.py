@@ -1,4 +1,5 @@
 import jax
+import hlax
 import optax
 import distrax
 import jax.numpy as jnp
@@ -97,6 +98,41 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
         nll_hist.append(nll.item())
         print(f"{nll:0.4e}", end="\r")
     return nll_hist, params_decoder, z_decoder
+
+
+def train_epoch(key, params, z_est, opt_states, observations,
+                batch_size, model, tx_params, tx_latent,
+                n_its_params, n_its_latent, lossfn):
+    """
+    Hard-EM LVM mini-batch training epoch
+
+    Parameters
+    ----------
+    n_its_params: int
+        Number of iterations of the M-step
+    n_its_latent: int
+        Number of iterations of the E-step
+    """
+    num_samples = len(observations)
+    key_batch, keys_vae = jax.random.split(key)
+    batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_samples, batch_size)
+    num_batches = len(batch_ixs)
+    keys_vae = jax.random.split(keys_vae, num_batches)
+    total_nll = 0
+    for batch_ix in batch_ixs:
+        batch = observations[batch_ix, ...]
+        z_batch = z_est[batch_ix, ...]
+
+        res = train_step(params, z_batch, opt_states,
+                        tx_params=tx_params, tx_latent=tx_latent,
+                        n_its_params=n_its_params, n_its_latent=n_its_latent,
+                        lossfn=lossfn, model=model, observations=batch)
+        nll, params, z_batch, opt_states = res
+        # Update minibatch of latent variables
+        z_est = z_est.at[batch_ix, ...].set(z_batch)
+
+        total_nll += nll
+    return total_nll, params, z_est, opt_states
 
 
 def loss_hard_nmll(params, z_batch, X_batch, model):
