@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 from functools import partial
 
 
-def initialise_epoch(key, model, tx, X, dim_latent):
+def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
     key_init_params, key_init_latent = jax.random.split(key)
 
     n_train, *_ = X.shape 
@@ -14,16 +14,18 @@ def initialise_epoch(key, model, tx, X, dim_latent):
     params_decoder = model.init(key_init_params, batch_init)
     z_decoder = jax.random.normal(key_init_latent, (n_train, dim_latent))
     
-    opt_params_state = tx.init(params_decoder)
-    opt_latent_state = tx.init(z_decoder)
+    opt_params_state = tx_params.init(params_decoder)
+    opt_latent_state = tx_latent.init(z_decoder)
     
     target_states = (params_decoder, z_decoder)
     opt_states = (opt_latent_state, opt_params_state)
     
     return opt_states, target_states
 
-@partial(jax.jit, static_argnames=("tx", "n_its", "lossfn", "model"))
-def train_step(params_decoder, z_est, opt_states, observations, tx, lossfn, model, n_its=1):
+
+@partial(jax.jit, static_argnames=("tx_params", "tx_latent", "n_its", "lossfn", "model"))
+def train_step(params_decoder, z_est, opt_states, observations,
+               tx_params, tx_latent, lossfn, model, n_its=1):
     opt_latent_state, opt_params_state = opt_states
 
     grad_e = jax.grad(lossfn, argnums=1)
@@ -32,13 +34,13 @@ def train_step(params_decoder, z_est, opt_states, observations, tx, lossfn, mode
     # E-step
     for i in range(n_its):
         grad_z = grad_e(params_decoder, z_est, observations, model)
-        updates, opt_latent_state = tx.update(grad_z, opt_latent_state, z_est)
+        updates, opt_latent_state = tx_latent.update(grad_z, opt_latent_state, z_est)
         z_est = optax.apply_updates(z_est, updates)
     
     # M-step
     for i in range(n_its):
         grad_theta = grad_m(params_decoder, z_est, observations, model)
-        updates, opt_params_state = tx.update(grad_theta, opt_params_state, params_decoder)
+        updates, opt_params_state = tx_params.update(grad_theta, opt_params_state, params_decoder)
         params_decoder = optax.apply_updates(params_decoder, updates)
 
     nll = lossfn(params_decoder, z_est, observations, model) 
@@ -51,6 +53,9 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     Train a full-batch hard-EM latent variable model of the form
     p(x, z) = p(x|z) p(z) = N(x|f(z), sigma^2 I) N(z|0, I),
     where sigma^2  is a vector of diagonal elements of the covariance matrix.
+
+    In this implementation, we consider a single optimiser for both the
+    parameters and the latent variables.
 
     Parameters
     ----------
@@ -74,13 +79,14 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     n_epochs: int
         Number of epochs to train for
     """
-    opt_states, target_states = initialise_epoch(key, model, tx, observations, dim_latent)
+    opt_states, target_states = initialise_state(key, model, tx, tx,
+                                                 observations, dim_latent)
     params_decoder, z_decoder = target_states
 
     nll_hist = []
     for e in tqdm(range(n_epochs)):
         res = train_step(params_decoder, z_decoder, opt_states,
-                        tx=tx, n_its=n_its, lossfn=lossfn,
+                        tx_params=tx, tx_latent=tx, n_its=n_its, lossfn=lossfn,
                         model=model, observations=observations)
         nll, params_decoder, z_decoder, opt_states = res
         nll_hist.append(nll.item())
