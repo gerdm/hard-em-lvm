@@ -22,8 +22,8 @@ def initialise_epoch(key, model, tx, X, dim_latent):
     
     return opt_states, target_states
 
-
-def epoch_step(params_decoder, z_est, opt_states, observations, tx, lossfn, model, n_its=1):
+@partial(jax.jit, static_argnames=("tx", "n_its", "lossfn", "model"))
+def train_step(params_decoder, z_est, opt_states, observations, tx, lossfn, model, n_its=1):
     opt_latent_state, opt_params_state = opt_states
 
     grad_e = jax.grad(lossfn, argnums=1)
@@ -77,14 +77,12 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     opt_states, target_states = initialise_epoch(key, model, tx, observations, dim_latent)
     params_decoder, z_decoder = target_states
 
-    part_step = jax.jit(partial(epoch_step,
-                                tx=tx, n_its=n_its, 
-                                lossfn=lossfn,
-                                observations=observations,
-                                model=model))
     nll_hist = []
     for e in tqdm(range(n_epochs)):
-        nll, params_decoder, z_decoder, opt_states = part_step(params_decoder, z_decoder, opt_states)
+        res = train_step(params_decoder, z_decoder, opt_states,
+                        tx=tx, n_its=n_its, lossfn=lossfn,
+                        model=model, observations=observations)
+        nll, params_decoder, z_decoder, opt_states = res
         nll_hist.append(nll.item())
         print(f"{nll:0.4e}", end="\r")
     return nll_hist, params_decoder, z_decoder
