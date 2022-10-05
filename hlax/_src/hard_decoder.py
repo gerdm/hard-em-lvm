@@ -24,6 +24,30 @@ def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
     return opt_states, target_states
 
 
+def e_step(_, state, grad_e, observations, tx, model):
+    """
+    E-step of the hard-EM LVM
+    """
+    opt_state, params, z_est = state
+    grad_z = grad_e(params, z_est, observations, model)
+    updates, opt_state = tx.update(grad_z, opt_state, z_est)
+    z_est = optax.apply_updates(z_est, updates)
+    new_state = (opt_state, params, z_est)
+    return new_state
+
+
+def m_step(_, state, grad_m, observations, tx, model):
+    """
+    M-step of the hard-EM LVM
+    """
+    opt_state, params, z_est = state
+    grad_params = grad_m(params, z_est, observations, model)
+    updates, opt_state = tx.update(grad_params, opt_state, params)
+    params = optax.apply_updates(params, updates)
+    new_state = (opt_state, params, z_est)
+    return new_state
+
+
 @partial(jax.jit, static_argnames=("tx_params", "tx_latent",
                                    "n_its_params", "n_its_latent",
                                    "lossfn", "model"))
@@ -34,18 +58,23 @@ def train_step(params_decoder, z_est, opt_states, observations,
 
     grad_e = jax.grad(lossfn, argnums=1)
     grad_m = jax.grad(lossfn, argnums=0)
-    
+
+    part_e_step = partial(e_step,
+                          grad_e=grad_e, observations=observations,
+                          tx=tx_latent, model=model)
+    part_m_step = partial(m_step,
+                            grad_m=grad_m, observations=observations,
+                            tx=tx_params, model=model)
+
     # E-step
-    for i in range(n_its_latent):
-        grad_z = grad_e(params_decoder, z_est, observations, model)
-        updates, opt_latent_state = tx_latent.update(grad_z, opt_latent_state, z_est)
-        z_est = optax.apply_updates(z_est, updates)
-    
+    init_state = (opt_latent_state, params_decoder, z_est)
+    final_state = jax.lax.fori_loop(0, n_its_latent, part_e_step, init_state)
+    opt_latent_state, params_decoder, z_est = final_state
+
     # M-step
-    for i in range(n_its_params):
-        grad_theta = grad_m(params_decoder, z_est, observations, model)
-        updates, opt_params_state = tx_params.update(grad_theta, opt_params_state, params_decoder)
-        params_decoder = optax.apply_updates(params_decoder, updates)
+    init_state = (opt_params_state, params_decoder, z_est)
+    final_state = jax.lax.fori_loop(0, n_its_params, part_m_step, init_state)
+    opt_params_state, params_decoder, z_est = final_state
 
     nll = lossfn(params_decoder, z_est, observations, model) 
     new_states = (opt_latent_state, opt_params_state)
