@@ -32,7 +32,7 @@ def iwae(key, params, apply_fn, X_batch):
     log_prob = log_prob_z_prior + log_prob_x - log_prob_z_post
     
     # negative Importance-weighted marginal log-likelihood
-    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).sum()
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).mean()
     return niwmll
 
 @partial(jax.jit, static_argnames="lossfn")
