@@ -138,6 +138,7 @@ def index_values_batch(observations, latent, ixs):
     z_batch = latent[ixs]
     return X_batch, z_batch
 
+
 @jax.jit
 def update_latent_params(z_total, z_sub, ix_sub):
     """
@@ -145,6 +146,7 @@ def update_latent_params(z_total, z_sub, ix_sub):
     """
     z_total = z_total.at[ix_sub].set(z_sub)
     return z_total
+
 
 def train_epoch(key, params, z_est, opt_states, observations,
                 batch_size, model, tx_params, tx_latent,
