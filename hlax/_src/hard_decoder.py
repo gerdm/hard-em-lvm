@@ -129,6 +129,23 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
     return nll_hist, params_decoder, z_decoder
 
 
+@jax.jit
+def index_values_batch(observations, latent, ixs):
+    """
+    Index values of a batch of observations and latent variables
+    """
+    X_batch = observations[ixs]
+    z_batch = latent[ixs]
+    return X_batch, z_batch
+
+@jax.jit
+def update_latent_params(z_total, z_sub, ix_sub):
+    """
+    Update the latent variables and parameters of a batch
+    """
+    z_total = z_total.at[ix_sub].set(z_sub)
+    return z_total
+
 def train_epoch(key, params, z_est, opt_states, observations,
                 batch_size, model, tx_params, tx_latent,
                 n_its_params, n_its_latent, lossfn):
@@ -149,8 +166,9 @@ def train_epoch(key, params, z_est, opt_states, observations,
     keys_vae = jax.random.split(keys_vae, num_batches)
     total_nll = 0
     for batch_ix in batch_ixs:
-        batch = observations[batch_ix, ...]
-        z_batch = z_est[batch_ix, ...]
+        # batch = observations[batch_ix, ...]
+        # z_batch = z_est[batch_ix, ...]
+        batch, z_batch = index_values_batch(observations, z_est, batch_ix)
 
         res = train_step(params, z_batch, opt_states,
                         tx_params=tx_params, tx_latent=tx_latent,
@@ -158,7 +176,8 @@ def train_epoch(key, params, z_est, opt_states, observations,
                         lossfn=lossfn, model=model, observations=batch)
         nll, params, z_batch, opt_states = res
         # Update minibatch of latent variables
-        z_est = z_est.at[batch_ix, ...].set(z_batch)
+        z_est = update_latent_params(z_est, z_batch, batch_ix)
+        # z_est = z_est.at[batch_ix, ...].set(z_batch)
 
         total_nll += nll
     return total_nll, params, z_est, opt_states
@@ -198,4 +217,4 @@ def loss_hard_nmll(params, z_batch, X_batch, model):
     
     log_prob = log_prob_z_prior + log_prob_x
     
-    return -log_prob.sum()
+    return -log_prob.mean()
