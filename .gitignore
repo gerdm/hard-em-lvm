@@ -1,5 +1,5 @@
 *.prof
-output/
+outputs/
 .DS_Store
 *.pdf
 *.npy
