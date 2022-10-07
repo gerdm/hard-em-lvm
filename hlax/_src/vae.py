@@ -55,7 +55,7 @@ def train_epoch(key, state, X, batch_size):
     
     total_loss = 0
     for key_vae, batch_ix in zip(keys_vae, batch_ixs):
-        X_batch = X[batch_ix, ...]
+        X_batch = hlax.training.index_values_batch(X, batch_ix)
         loss, state = train_step(state, X_batch, key_vae, lossfn=iwae)
         total_loss += loss
     

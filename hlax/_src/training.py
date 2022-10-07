@@ -12,6 +12,15 @@ def index_values_latent_batch(observations, latent, ixs):
     return X_batch, z_batch
 
 
+@jax.jit
+def index_values_batch(observations, ixs):
+    """
+    Index values of a batch of observations
+    """
+    X_batch = observations[ixs]
+    return X_batch
+
+
 @partial(jax.jit, static_argnums=(1,2))
 def get_batch_train_ixs(key, num_samples, batch_size):
     """
