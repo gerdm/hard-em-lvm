@@ -130,16 +130,6 @@ def train_epoch_full(key, observations, model, tx, dim_latent, lossfn, n_its, n_
 
 
 @jax.jit
-def index_values_batch(observations, latent, ixs):
-    """
-    Index values of a batch of observations and latent variables
-    """
-    X_batch = observations[ixs]
-    z_batch = latent[ixs]
-    return X_batch, z_batch
-
-
-@jax.jit
 def update_latent_params(z_total, z_sub, ix_sub):
     """
     Update the latent variables and parameters of a batch
@@ -168,9 +158,7 @@ def train_epoch(key, params, z_est, opt_states, observations,
     keys_vae = jax.random.split(keys_vae, num_batches)
     total_nll = 0
     for batch_ix in batch_ixs:
-        # batch = observations[batch_ix, ...]
-        # z_batch = z_est[batch_ix, ...]
-        batch, z_batch = index_values_batch(observations, z_est, batch_ix)
+        batch, z_batch = hlax.training.index_values_latent_batch(observations, z_est, batch_ix)
 
         res = train_step(params, z_batch, opt_states,
                         tx_params=tx_params, tx_latent=tx_latent,
