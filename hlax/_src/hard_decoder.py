@@ -138,6 +138,96 @@ def update_latent_params(z_total, z_sub, ix_sub):
     return z_total
 
 
+@jax.jit
+def get_batch_adam_params(opt_latent, ixs):
+    """
+    Get the parameters of a batch from the optimiser state
+    """
+    mu_sub = jax.tree_map(lambda x: x[ixs], opt_latent[0].mu)
+    nu_sub = jax.tree_map(lambda x: x[ixs], opt_latent[0].nu)
+
+    return mu_sub, nu_sub
+
+
+@jax.jit
+def create_batch_adam_params(opt_state, ixs):
+    """
+    Create the optimiser state from the parameters of a batch
+    """
+    opt_latent_state, opt_params_state = opt_state
+    mu_sub, nu_sub = get_batch_adam_params(opt_latent_state, ixs)
+
+    opt_latent_sub = (
+        opt_latent_state[0]._replace(
+            mu = mu_sub,
+            nu = nu_sub
+        ),
+    ) + opt_latent_state[1:]
+
+    opt_state_sub = (opt_latent_sub, opt_params_state)
+    return opt_state_sub
+
+
+@jax.jit
+def reconstruct_full_adam_params(opt_state, opt_state_sub, ixs):
+    opt_latent_state, _ = opt_state
+    opt_latent_batch, opt_params_update = opt_state_sub
+    mu_sub, nu_sub = get_batch_adam_params(opt_latent_batch, ixs)
+
+    mu_update = jax.tree_map(lambda x: x.at[ixs].set(mu_sub), opt_latent_state[0].mu)
+    nu_update = jax.tree_map(lambda x: x.at[ixs].set(nu_sub), opt_latent_state[0].nu)
+
+    opt_latent_state_new = (
+        opt_latent_state[0]._replace(
+            mu = mu_update,
+            nu = nu_update
+        ),
+    ) + opt_latent_state[1:]
+
+    opt_state_new = (opt_latent_state_new, opt_params_update)
+    return opt_state_new
+
+
+def train_epoch_adam(key, params, z_est, opt_states, observations,
+                batch_size, model, tx_params, tx_latent,
+                n_its_params, n_its_latent, lossfn):
+    """
+    Hard-EM LVM mini-batch training epoch
+
+    Parameters
+    ----------
+    n_its_params: int
+        Number of iterations of the M-step
+    n_its_latent: int
+        Number of iterations of the E-step
+    """
+    num_samples = len(observations)
+    key_batch, keys_vae = jax.random.split(key)
+    batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_samples, batch_size)
+    num_batches = len(batch_ixs)
+    keys_vae = jax.random.split(keys_vae, num_batches)
+    total_nll = 0
+    for batch_ix in batch_ixs:
+        batch, z_batch = hlax.training.index_values_latent_batch(observations, z_est, batch_ix)
+
+        # Decompose batch params for E-step
+        opt_states_batch = create_batch_adam_params(opt_states, batch_ix)
+
+        res = train_step(params, z_batch, opt_states_batch,
+                        tx_params=tx_params, tx_latent=tx_latent,
+                        n_its_params=n_its_params, n_its_latent=n_its_latent,
+                        lossfn=lossfn, model=model, observations=batch)
+        nll, params, z_batch, opt_states_batch = res
+        # Update minibatch of latent variables
+        z_est = update_latent_params(z_est, z_batch, batch_ix)
+
+        # Update minibatch of optimiser states
+        opt_states = reconstruct_full_adam_params(opt_states, opt_states_batch, batch_ix)
+
+        total_nll += nll
+    return total_nll, params, z_est, opt_states
+
+
 def train_epoch(key, params, z_est, opt_states, observations,
                 batch_size, model, tx_params, tx_latent,
                 n_its_params, n_its_latent, lossfn):
@@ -167,7 +257,6 @@ def train_epoch(key, params, z_est, opt_states, observations,
         nll, params, z_batch, opt_states = res
         # Update minibatch of latent variables
         z_est = update_latent_params(z_est, z_batch, batch_ix)
-        # z_est = z_est.at[batch_ix, ...].set(z_batch)
 
         total_nll += nll
     return total_nll, params, z_est, opt_states
