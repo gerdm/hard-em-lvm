@@ -35,6 +35,7 @@ def iwae(key, params, apply_fn, X_batch):
     niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).mean()
     return niwmll
 
+
 @partial(jax.jit, static_argnames="lossfn")
 def train_step(state, X, key, lossfn):
     params = state.params
