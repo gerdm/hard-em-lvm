@@ -15,13 +15,11 @@ class FADecoder(nn.Module):
     normal_init: Callable = nn.initializers.normal()
     uniform_init: Callable = nn.initializers.uniform()
 
-    
     def setup(self):
         self.b = self.param("b", self.normal_init, (self.dim_obs,))
         self.A = self.param("A", self.normal_init, (self.dim_obs, self.dim_latent))
         # self.logPsi = self.param("logPsi", self.normal_init, (self.dim_obs, self.dim_latent))
         self.logPsi = self.param("logPsi", self.normal_init, (self.dim_obs,))
-
 
     def eval_mean(self, z):
         mean_x = jnp.einsum("...m,dm->...d", z, self.A)+ self.b
@@ -33,7 +31,6 @@ class FADecoder(nn.Module):
         logvar_x = jnp.einsum("...m,dm->...d", z, zeros) + self.logPsi
 
         return logvar_x
-
 
     def __call__(self, z):
         mean_x = self.eval_mean(z)
@@ -61,7 +58,6 @@ class HomkDecoder(nn.Module):
         logvar_x = jnp.einsum("...m,dm->...d", z, zeros) + self.logPsi
 
         return logvar_x
-
 
     @nn.compact
     def __call__(self, z):
@@ -105,7 +101,6 @@ class EncoderFullCov(nn.Module):
         self.mean_layer = nn.Dense(self.latent_dim, name="latent_mean")
         self.logvardiag_layer = nn.Dense(self.latent_dim, use_bias=False, name="latent_logvardiag", kernel_init=init_tri)
         self.tril_layer  = nn.Dense(tril_dim, name="latent_tril", use_bias=False, kernel_init=init_tri)
-
 
     @nn.compact
     def __call__(self, x):

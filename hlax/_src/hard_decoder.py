@@ -194,6 +194,10 @@ def train_epoch_adam(key, params, z_est, opt_states, observations,
     """
     Hard-EM LVM mini-batch training epoch
 
+    See https://flax.readthedocs.io/en/latest/guides/model_surgery.html#surgery-with-optimizers
+    for details on how to update the optimiser state when the parameters to be optimised
+    depend on the batch.
+
     Parameters
     ----------
     n_its_params: int
