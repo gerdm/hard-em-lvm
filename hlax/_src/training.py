@@ -3,6 +3,7 @@ import distrax
 import optax
 import jax.numpy as jnp
 from functools import partial
+from tqdm.auto import tqdm
 
 
 @jax.jit
@@ -94,3 +95,45 @@ def run_epoch_encoder(key, params_encoder, states, observations, tx, params_deco
     )
     
     return mll_vals, params_encoder, states
+
+@partial(jax.vmap, in_axes=(0, None, None))
+def init_params_state_encoder(key, encoder, tx):
+    key_init, key_sample = jax.random.split(key)
+    params = encoder.init(key_init, key_sample)
+    state = tx.init(params)
+    return params, state
+
+
+def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
+                  num_is_samples=10):
+    n_samples = len(X)
+    keys_test, keys_eval = jax.random.split(key)
+    keys_test = jax.random.split(keys_test, n_samples)
+    keys_eval = jax.random.split(keys_eval, n_epochs)
+
+    states = init_params_state_encoder(keys_test, encoder, tx)
+    params_latent, latent_states = states
+
+    hist_mll = []
+    for key_eval in tqdm(keys_eval):
+        mll_vals, params_latent, latent_states = run_epoch_encoder(
+            key_eval,
+            params_latent,
+            latent_states,
+            X,
+            tx,
+            params_decoder,
+            encoder,
+            decoder,
+            num_is_samples=num_is_samples
+        )
+        
+        mll_mean = mll_vals.mean()
+        print(f"{mll_mean:0.3e}", end="\r")
+        hist_mll.append(mll_mean)
+
+    return {
+        "mll": hist_mll,
+        "params": params_latent,
+        "states": latent_states
+    }
