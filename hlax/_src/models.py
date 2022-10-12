@@ -118,6 +118,27 @@ class EncoderFullCov(nn.Module):
         return mean_z, Lz + diag_z
 
 
+class GaussEncoder(nn.Module):
+    dim_latent: int
+    normal_init: Callable = nn.initializers.normal()
+
+    def setup(self):
+        self.mu = self.param("mu", self.normal_init, (self.dim_latent,))
+        self.logvar_diag = self.param("logvar_diag", self.normal_init, (self.dim_latent,))
+
+    def sample_proposal(self, key, num_samples):
+        std = jnp.exp(self.logvar_diag / 2)
+        eps = jax.random.normal(key, (num_samples, self.dim_latent))
+        z = self.mu[None, ...] + jnp.einsum("d,...d->...d", std, eps)
+        return z
+
+    def __call__(self, key, num_samples=1):
+        std = jnp.exp(self.logvar_diag / 2)
+        z_samples = self.sample_proposal(key, num_samples=num_samples)
+
+        return z_samples, (self.mu, std)
+
+
 class VAE_IW(nn.Module):
     """
     Importance-Weighted Variational Autoencoder
