@@ -83,8 +83,7 @@ def update_encoder_parameters(key, params_encoder, opt_state, obs, params_decode
     return mll, params_encoder, opt_state
 
 
-@partial(jax.jit, static_argnames=("tx", "n_samples", "encoder",
-                                   "decoder", "num_is_samples"))
+@partial(jax.jit, static_argnames=("tx", "encoder", "decoder", "num_is_samples"))
 def run_epoch_encoder(key, params_encoder, states, observations, tx, params_decoder,
                       encoder, decoder, num_is_samples=10):
     num_obs = len(observations)
