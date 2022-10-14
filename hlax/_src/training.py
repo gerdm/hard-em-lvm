@@ -40,8 +40,8 @@ def get_batch_train_ixs(key, num_samples, batch_size):
     return batch_ixs
 
 
-def neg_iwmll_encoder(key, params_encoder, params_decoder, observation,
-                  encoder, decoder, num_is_samples=10):
+def neg_iwmll(key, params_encoder, params_decoder, observation,
+                      encoder, decoder, num_is_samples=10):
     """
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
     gaussian encoder.
@@ -69,7 +69,7 @@ def neg_iwmll_encoder(key, params_encoder, params_decoder, observation,
     return niwmll
 
 
-grad_neg_iwmll_encoder = jax.value_and_grad(neg_iwmll_encoder, argnums=1)
+grad_neg_iwmll_encoder = jax.value_and_grad(neg_iwmll, argnums=1)
 
 
 @partial(jax.vmap, in_axes=(0, 0, 0, 0, None, None, None, None, None))
@@ -117,7 +117,7 @@ def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
     states = init_params_state_encoder(keys_test, encoder, tx)
     params_latent, latent_states = states
 
-    hist_mll = []
+    hist_negmll = []
     for key_eval in tqdm(keys_eval):
         mll_vals, params_latent, latent_states = run_epoch_encoder(
             key_eval,
@@ -133,10 +133,10 @@ def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
         
         mll_mean = mll_vals.mean()
         print(f"{mll_mean:0.3e}", end="\r")
-        hist_mll.append(mll_mean)
+        hist_negmll.append(mll_mean)
 
     return {
-        "mll": hist_mll,
+        "neg_mll": hist_negmll,
         "params": params_latent,
         "states": latent_states
     }
