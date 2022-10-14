@@ -56,7 +56,6 @@ def neg_iwmll_encoder(key, params_encoder, params_decoder, observation,
     log_px_cond = distrax.MultivariateNormalDiag(mu_x, std_x).log_prob(observation)
     
     # log p(z)
-    # mu_z_init, std_z_init = z_prior, jnp.ones(dim_latent)
     mu_z_init, std_z_init = jnp.zeros(dim_latent), jnp.ones(dim_latent)
     log_pz = distrax.MultivariateNormalDiag(mu_z_init, std_z_init).log_prob(latent_samples)
     
@@ -65,7 +64,7 @@ def neg_iwmll_encoder(key, params_encoder, params_decoder, observation,
     
     # Importance-weighted marginal log-likelihood
     log_prob = log_pz + log_px_cond - log_qz
-    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples)
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).sum()
     
     return niwmll
 
@@ -75,7 +74,7 @@ grad_neg_iwmll_encoder = jax.value_and_grad(neg_iwmll_encoder, argnums=1)
 
 @partial(jax.vmap, in_axes=(0, 0, 0, 0, None, None, None, None, None))
 def update_encoder_parameters(key, params_encoder, opt_state, obs, params_decoder, tx,
-                      encoder, decoder, num_is_samples=10):
+                              encoder, decoder, num_is_samples=10):
     mll, grads = grad_neg_iwmll_encoder(key, params_encoder, params_decoder, obs,
                                         encoder, decoder, num_is_samples)
     updates, opt_state = tx.update(grads, opt_state, params_encoder)
@@ -106,6 +105,10 @@ def init_params_state_encoder(key, encoder, tx):
 
 def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
                   num_is_samples=10):
+    """
+    Train an unamortised variational distribution q(z|x) using the
+    importance-weighted marginal log-likelihood.
+    """
     n_samples = len(X)
     keys_test, keys_eval = jax.random.split(key)
     keys_test = jax.random.split(keys_test, n_samples)
