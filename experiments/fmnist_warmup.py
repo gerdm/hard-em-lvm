@@ -3,12 +3,17 @@ In this script we train a VAE on Fashion MNIST and a HardEM
 over the decoder of the VAE.
 
 We consider a two-layered MLP for the encoder and homoskedastic decoder.
+
+ToDo:
+*  normailsed passing initialised or unititialised encoder / decoder
 """
 
+import pdb
 import jax
 import hlax
 import optax
 import chex
+import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
 from datetime import datetime
@@ -49,6 +54,16 @@ class WarmupConfigHardEM:
     class_decoder: nn.Module
 
 
+@dataclass
+class TestConfig:
+    num_epochs: int
+    num_is_samples: int
+    dim_latent: int
+    tx: optax.GradientTransformation
+    class_encoder: nn.Module # Unamortised
+    class_decoder: nn.Module
+
+
 class Encoder(nn.Module):
     """
     For the inference model p(z|x)
@@ -65,6 +80,60 @@ class Encoder(nn.Module):
         mean_z = nn.Dense(self.latent_dim)(z)
         logvar_z = nn.Dense(self.latent_dim)(z)
         return mean_z, logvar_z
+
+
+def setup():
+    Decoder = hlax.models.DiagDecoder
+
+    num_epochs = 1_000
+    batch_size = 200
+    dim_latent = 50
+    eval_epochs = [2, 10, 100, 250, 500, 1000]
+
+    num_is_samples = 10
+    tx_vae = optax.adam(1e-3)
+
+    num_its_params = 5
+    num_its_latent = 20
+    tx_params = optax.adam(1e-3)
+    tx_latent = optax.adam(1e-3)
+
+    num_epochs_test = 5_000
+    tx_test = optax.adam(1e-4)
+
+    config_vae = WarmupConfigVAE(
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        dim_latent=dim_latent,
+        eval_epochs=eval_epochs,
+        num_is_samples=num_is_samples,
+        tx_vae=tx_vae,
+        class_encoder=Encoder,
+        class_decoder=Decoder,
+    )
+    
+    config_hardem = WarmupConfigHardEM(
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        dim_latent=dim_latent,
+        eval_epochs=eval_epochs,
+        num_its_params=num_its_params,
+        num_its_latent=num_its_latent,
+        tx_params=tx_params,
+        tx_latent=tx_latent,
+        class_decoder=Decoder,
+    )
+
+    config_test = TestConfig(
+        num_epochs=num_epochs_test,
+        num_is_samples=num_is_samples,
+        dim_latent=dim_latent,
+        tx=tx_test,
+        class_encoder=hlax.models.GaussEncoder,
+        class_decoder=Decoder,
+    )
+
+    return config_vae, config_hardem, config_test
 
 
 def warmup_vae(
@@ -165,55 +234,13 @@ def load_dataset(n_train, n_test):
     return X_train, X_test
 
 
-def main(num_train, num_test):
-    key = jax.random.PRNGKey(314)
+def warmup_phase(key, X_train, config_vae, config_hardem):
     key_vae, key_hardem = jax.random.split(key)
 
-    train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
-    X_train, X_test = train[0], test[0]
-
-    num_epochs = 1_000
-    batch_size = 200
-    dim_latent = 50
-    eval_epochs = [2, 10, 100, 250, 500, 1000]
-
-    num_is_samples = 10
-    tx_vae = optax.adam(1e-3)
-
-    num_its_params = 5
-    num_its_latent = 20
-    tx_params = optax.adam(1e-3)
-    tx_latent = optax.adam(1e-3)
-
-    Decoder = hlax.models.DiagDecoder
-
-    config_vae = WarmupConfigVAE(
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        dim_latent=dim_latent,
-        eval_epochs=eval_epochs,
-        num_is_samples=num_is_samples,
-        tx_vae=tx_vae,
-        class_encoder=Encoder,
-        class_decoder=Decoder,
-    )
-    
-    config_hardem = WarmupConfigHardEM(
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        dim_latent=dim_latent,
-        eval_epochs=eval_epochs,
-        num_its_params=num_its_params,
-        num_its_latent=num_its_latent,
-        tx_params=tx_params,
-        tx_latent=tx_latent,
-        class_decoder=Decoder,
-    )
-
-    dict_params_hardem, hist_loss_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
     dict_params_vae, hist_loss_vae = warmup_vae(key_vae, config_vae, X_train)
+    dict_params_hardem, hist_loss_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
 
-    return {
+    output =  {
         "vae": {
             "checkpoint_params": dict_params_vae,
             "hist_loss": hist_loss_vae,
@@ -223,6 +250,66 @@ def main(num_train, num_test):
             "hist_loss": hist_loss_hardem,
         },
     }
+
+    return output
+
+
+def test_phase(key, X_test, config_test, output_warmup):
+    _, dim_obs = X_test.shape
+
+    encoder_test = config_test.class_encoder(config_test.dim_latent)
+    decoder_test = config_test.class_decoder(dim_obs, config_test.dim_latent)
+
+    key_train, key_eval= jax.random.split(key)
+    keys_eval = jax.random.split(key_eval, len(X_test))
+
+    vmap_neg_iwmll = jax.vmap(hlax.training.neg_iwmll, (0, 0, None, 0, None, None, None))
+
+    dict_mll_epochs = {}
+
+    checkpoint_vals = output_warmup["hardem"]["checkpoint_params"].keys()
+    for keyv in tqdm(checkpoint_vals):
+        params_decoder_vae = output_warmup["vae"]["checkpoint_params"][keyv]
+        params_decoder_hem = output_warmup["hardem"]["checkpoint_params"][keyv]
+
+
+        vae_res = hlax.training.train_encoder(key_train, X_test, encoder_test, decoder_test,
+                                            params_decoder_vae, config_test.tx, config_test.num_epochs,
+                                            config_test.num_is_samples, leave=False)
+
+        hem_res = hlax.training.train_encoder(key_train, X_test, encoder_test, decoder_test,
+                                            params_decoder_hem, config_test.tx, config_test.num_epochs,
+                                            config_test.num_is_samples, leave=False)
+        
+        mll_vae = -vmap_neg_iwmll(keys_eval, vae_res["params"], params_decoder_vae, X_test, encoder_test, decoder_test, 50)
+        mll_hem = -vmap_neg_iwmll(keys_eval, hem_res["params"], params_decoder_hem, X_test, encoder_test, decoder_test, 50)
+        
+        mll_vals = np.c_[mll_hem, mll_vae]
+        dict_mll_epochs[keyv] = mll_vals 
+    
+    return dict_mll_epochs
+
+
+def main(num_train, num_test):
+    key = jax.random.PRNGKey(314)
+    key_warmup, key_eval = jax.random.split(key)
+
+    train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
+    X_train, X_test = train[0], test[0]
+
+    config_vae, config_hardem, config_test  = setup()
+
+    print("Warmup phase")
+    warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem)
+    print("Test phase")
+    test_output = test_phase(key_eval, X_test, config_test, warmup_output)
+
+    output = {
+        "warmup": warmup_output,
+        "test": test_output,
+    }
+
+    return output
 
 
 if __name__ == "__main__":
@@ -234,7 +321,7 @@ if __name__ == "__main__":
     os.environ["TPU_VISIBLE_DEVICES"] = "1"
 
     num_train, num_test = 10_000, 1_000
-    res = main(num_train, num_test)
+    output = main(num_train, num_test)
 
-    with open("results.pkl", "wb") as f:
-        pickle.dump(res, f)
+    with open("results-full.pkl", "wb") as f:
+        pickle.dump(output, f)
