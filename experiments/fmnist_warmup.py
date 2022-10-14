@@ -5,7 +5,6 @@ over the decoder of the VAE.
 We consider a two-layered MLP for the encoder and homoskedastic decoder.
 """
 
-from re import L
 import jax
 import hlax
 import optax

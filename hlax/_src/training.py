@@ -104,7 +104,7 @@ def init_params_state_encoder(key, encoder, tx):
 
 
 def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
-                  num_is_samples=10):
+                  num_is_samples=10, leave=True):
     """
     Train an unamortised variational distribution q(z|x) using the
     importance-weighted marginal log-likelihood.
@@ -118,7 +118,7 @@ def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
     params_latent, latent_states = states
 
     hist_negmll = []
-    for key_eval in tqdm(keys_eval):
+    for key_eval in (pbar := tqdm(keys_eval, leave=leave)):
         mll_vals, params_latent, latent_states = run_epoch_encoder(
             key_eval,
             params_latent,
@@ -132,7 +132,7 @@ def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
         )
         
         mll_mean = mll_vals.mean()
-        print(f"{mll_mean:0.3e}", end="\r")
+        pbar.set_description(f"{mll_mean=:.3e}")
         hist_negmll.append(mll_mean)
 
     return {
