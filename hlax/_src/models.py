@@ -48,6 +48,7 @@ class HomkDecoder(nn.Module):
     dim_obs: int
     dim_latent: int = 20
     normal_init: Callable = nn.initializers.normal()
+    activation = nn.relu
     
     def setup(self):
         self.logPsi = self.param("logPsi", self.normal_init, (self.dim_obs,))
@@ -62,9 +63,8 @@ class HomkDecoder(nn.Module):
     @nn.compact
     def __call__(self, z):
         x = nn.Dense(30)(z)
-        x = nn.relu(x)
+        x = self.activation(x)
         mean_x = nn.Dense(self.dim_obs, use_bias=True)(x)
-        # logvar_x = nn.Dense(self.dim_obs, use_bias=False)(x)
         logvar_x = self.eval_diag_cov(z)
         
         return mean_x, logvar_x
@@ -78,12 +78,17 @@ class DiagDecoder(nn.Module):
     dim_full: int
     dim_latent: int = 20
     
-    @nn.compact
+    def setup(self):
+        self.activation = nn.tanh
+        self.hidden = nn.Dense(20, name="hidden")
+        self.mean = nn.Dense(self.dim_full, use_bias=True, name="mean")
+        self.logvar = nn.Dense(self.dim_full, use_bias=False, name="logvar")
+    
     def __call__(self, z):
-        x = nn.Dense(20)(z)
-        x = nn.relu(x)
-        mean_x = nn.Dense(self.dim_full)(x)
-        logvar_x = nn.Dense(self.dim_full)(x)
+        x = self.hidden(z)
+        x = self.activation(x)
+        mean_x = self.mean(x)
+        logvar_x = self.logvar(x)
         return mean_x, logvar_x 
 
 
