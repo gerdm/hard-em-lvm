@@ -46,8 +46,9 @@ def neg_iwmll(key, params_encoder, params_decoder, observation,
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
     gaussian encoder.
     """
-    latent_samples, (mu_z, std_z) = encoder.apply(params_encoder, key,
-                                                  num_samples=num_is_samples)
+    latent_samples, (mu_z, std_z) = encoder.apply(
+        params_encoder, key, num_samples=num_is_samples
+    )
 
     _, dim_latent = latent_samples.shape
     # log p(x|z)
@@ -64,8 +65,7 @@ def neg_iwmll(key, params_encoder, params_decoder, observation,
     
     # Importance-weighted marginal log-likelihood
     log_prob = log_pz + log_px_cond - log_qz
-    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).sum()
-    
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples)
     return niwmll
 
 
