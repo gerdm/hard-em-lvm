@@ -8,7 +8,6 @@ ToDo:
 *  normailsed passing initialised or unititialised encoder / decoder
 """
 
-import pdb
 import jax
 import hlax
 import optax
@@ -82,52 +81,44 @@ class Encoder(nn.Module):
         return mean_z, logvar_z
 
 
-def setup():
+def setup(config):
     Decoder = hlax.models.DiagDecoder
 
-    num_epochs = 1_000
-    batch_size = 200
-    dim_latent = 50
-    eval_epochs = [2, 10, 100, 250, 500, 1000]
+    learning_rate = config["warmup"]["learning_rate"]
+    learning_rate_test = config["warmup"]["learning_rate"]
 
-    num_is_samples = 10
-    tx_vae = optax.adam(1e-3)
-
-    num_its_params = 5
-    num_its_latent = 20
-    tx_params = optax.adam(1e-3)
-    tx_latent = optax.adam(1e-3)
-
-    num_epochs_test = 5_000
-    tx_test = optax.adam(1e-4)
+    tx_vae = optax.adam(learning_rate)
+    tx_params = optax.adam(learning_rate)
+    tx_latent = optax.adam(learning_rate)
+    tx_test = optax.adam(learning_rate_test)
 
     config_vae = WarmupConfigVAE(
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        dim_latent=dim_latent,
-        eval_epochs=eval_epochs,
-        num_is_samples=num_is_samples,
+        num_epochs=config["warmup"]["num_epochs"],
+        batch_size=config["warmup"]["batch_size"],
+        dim_latent=config["warmup"]["dim_latent"],
+        eval_epochs=config["warmup"]["eval_epochs"],
+        num_is_samples=config["warmup"]["vae"]["num_is_samples"],
         tx_vae=tx_vae,
         class_encoder=Encoder,
         class_decoder=Decoder,
     )
     
     config_hardem = WarmupConfigHardEM(
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        dim_latent=dim_latent,
-        eval_epochs=eval_epochs,
-        num_its_params=num_its_params,
-        num_its_latent=num_its_latent,
+        num_epochs=config["warmup"]["num_epochs"],
+        batch_size=config["warmup"]["batch_size"],
+        dim_latent=config["warmup"]["dim_latent"],
+        eval_epochs=config["warmup"]["eval_epochs"],
+        num_its_params=config["warmup"]["hard_em"]["num_its_params"],
+        num_its_latent=config["warmup"]["hard_em"]["num_its_latent"],
         tx_params=tx_params,
         tx_latent=tx_latent,
         class_decoder=Decoder,
     )
 
     config_test = TestConfig(
-        num_epochs=num_epochs_test,
-        num_is_samples=num_is_samples,
-        dim_latent=dim_latent,
+        num_epochs=config["test"]["num_epochs"],
+        num_is_samples=config["test"]["num_is_samples"],
+        dim_latent=config["warmup"]["dim_latent"],
         tx=tx_test,
         class_encoder=hlax.models.GaussEncoder,
         class_decoder=Decoder,
@@ -290,14 +281,17 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(num_train, num_test):
+def main(config):
+    num_train = config["warmup"]["num_obs"]
+    num_test = config["test"]["num_obs"]
+
     key = jax.random.PRNGKey(314)
     key_warmup, key_eval = jax.random.split(key)
 
     train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
     X_train, X_test = train[0], test[0]
 
-    config_vae, config_hardem, config_test  = setup()
+    config_vae, config_hardem, config_test  = setup(config)
 
     print("Warmup phase")
     warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem)
@@ -314,14 +308,19 @@ def main(num_train, num_test):
 
 if __name__ == "__main__":
     import os
+    import sys
+    import tomli
     import pickle
 
     os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
     os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
     os.environ["TPU_VISIBLE_DEVICES"] = "1"
 
-    num_train, num_test = 10_000, 1_000
-    output = main(num_train, num_test)
+    path_config = sys.argv[1]
+    with open(path_config, "rb") as f:
+        config = tomli.load(f)
+
+    output = main(config)
 
     with open("results-full.pkl", "wb") as f:
         pickle.dump(output, f)
