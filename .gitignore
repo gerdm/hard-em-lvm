@@ -1,8 +1,8 @@
 *.prof
-outputs/
 .DS_Store
 *.pdf
 *.npy
+*.pkl
 
 # LATEX STUFF
 ## Core latex/pdflatex auxiliary files:
