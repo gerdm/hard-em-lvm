@@ -144,6 +144,24 @@ class GaussEncoder(nn.Module):
         return z_samples, (self.mu, std)
 
 
+class EncoderSimple(nn.Module):
+    """
+    two-layered encoder
+    """
+    latent_dim: int
+    n_hidden: int = 5
+    
+    @nn.compact
+    def __call__(self, x):
+        z = nn.Dense(self.n_hidden)(x)
+        z = nn.relu(z)
+        z = nn.Dense(self.n_hidden)(z)
+        z = nn.relu(z)
+        mean_z = nn.Dense(self.latent_dim)(z)
+        logvar_z = nn.Dense(self.latent_dim)(z)
+        return mean_z, logvar_z
+
+
 class VAE_IW(nn.Module):
     """
     Importance-Weighted Variational Autoencoder
