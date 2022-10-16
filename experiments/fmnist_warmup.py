@@ -329,5 +329,5 @@ if __name__ == "__main__":
         "timestamp": now,
     }
 
-    with open("results-full.pkl", "wb") as f:
+    with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
         pickle.dump(output, f)
