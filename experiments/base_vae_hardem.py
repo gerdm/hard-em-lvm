@@ -1,8 +1,22 @@
 """
-In this script we train a VAE on Fashion MNIST and a HardEM
-over the decoder of the VAE.
+In this experiment, we consider a latent variable model
+        p(x, z) = p(x|z) p(z)
+Where p(x|z) is parametrized by a neural network with
+parameters theta and p(z) is a standard Gaussian.
 
-We consider a two-layered MLP for the encoder and homoskedastic decoder.
+We estimate the parameters theta of the inference model
+1. Defining a variational distribution q(z|x; phi) using
+    the IWAE estimator.
+2. Using the Hard EM algorithm to estimate the parameters
+    theta of the inference model directly.
+
+After estimating theta, we consider a variational
+distribution q(zn|xn; phi{n}) and estimate the parameters phi{n}
+for each n=1,...,N using the IWAE estimator.
+
+We compare the performance of the two methods by evaluating
+the marginal likelihood p(x) = \int p(x|z) p(z) dz using
+the importance sampling estimator.
 
 ToDo:
 *  normailsed passing initialised or unititialised encoder / decoder
@@ -63,26 +77,12 @@ class TestConfig:
     class_decoder: nn.Module
 
 
-class Encoder(nn.Module):
-    """
-    For the inference model p(z|x)
-    """
-    latent_dim: int
-    n_hidden: int = 5
-    
-    @nn.compact
-    def __call__(self, x):
-        z = nn.Dense(self.n_hidden)(x)
-        z = nn.relu(z)
-        z = nn.Dense(self.n_hidden)(z)
-        z = nn.relu(z)
-        mean_z = nn.Dense(self.latent_dim)(z)
-        logvar_z = nn.Dense(self.latent_dim)(z)
-        return mean_z, logvar_z
-
-
 def setup(config):
-    Decoder = hlax.models.DiagDecoder
+    # q(z|x)
+    Decoder = config["models"]["class_decoder"]
+    # p(x|z)
+    Encoder = config["models"]["class_encoder"]
+    EncoderTest = config["models"]["class_encoder_test"]
 
     learning_rate = config["warmup"]["learning_rate"]
     learning_rate_test = config["warmup"]["learning_rate"]
@@ -120,7 +120,7 @@ def setup(config):
         num_is_samples=config["test"]["num_is_samples"],
         dim_latent=config["warmup"]["dim_latent"],
         tx=tx_test,
-        class_encoder=hlax.models.GaussEncoder,
+        class_encoder=EncoderTest,
         class_decoder=Decoder,
     )
 
@@ -228,6 +228,7 @@ def load_dataset(n_train, n_test):
 def warmup_phase(key, X_train, config_vae, config_hardem):
     key_vae, key_hardem = jax.random.split(key)
 
+    # Obtain inference model parameters
     dict_params_vae, hist_loss_vae = warmup_vae(key_vae, config_vae, X_train)
     dict_params_hardem, hist_loss_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
 
@@ -323,7 +324,14 @@ if __name__ == "__main__":
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
+    config["models"] = {}
+    config["models"]["class_decoder"] = hlax.models.DiagDecoder
+    config["models"]["class_encoder"] = hlax.models.EncoderSimple
+    config["models"]["class_encoder_test"] = hlax.models.GaussEncoder 
+
     output = main(config)
+
+    config.pop("models")
     output["metadata"] = {
         "config": config,
         "timestamp": now,
