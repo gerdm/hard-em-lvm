@@ -77,12 +77,12 @@ class TestConfig:
     class_decoder: nn.Module
 
 
-def setup(config):
+def setup(config, dict_models):
     # q(z|x)
-    Decoder = config["models"]["class_decoder"]
+    Decoder = dict_models["class_decoder"]
     # p(x|z)
-    Encoder = config["models"]["class_encoder"]
-    EncoderTest = config["models"]["class_encoder_test"]
+    Encoder = dict_models["class_encoder"]
+    EncoderTest = dict_models["class_encoder_test"]
 
     learning_rate = config["warmup"]["learning_rate"]
     learning_rate_test = config["warmup"]["learning_rate"]
@@ -282,7 +282,7 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(config):
+def main(config, dict_models):
     num_train = config["warmup"]["num_obs"]
     num_test = config["test"]["num_obs"]
 
@@ -292,7 +292,7 @@ def main(config):
     train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
     X_train, X_test = train[0], test[0]
 
-    config_vae, config_hardem, config_test  = setup(config)
+    config_vae, config_hardem, config_test  = setup(config, dict_models)
 
     print("Warmup phase")
     warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem)
@@ -324,14 +324,14 @@ if __name__ == "__main__":
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
-    config["models"] = {}
-    config["models"]["class_decoder"] = hlax.models.DiagDecoder
-    config["models"]["class_encoder"] = hlax.models.EncoderSimple
-    config["models"]["class_encoder_test"] = hlax.models.GaussEncoder 
+    dict_models = {
+        "class_decoder": hlax.models.DiagDecoder,
+        "class_encoder": hlax.models.EncoderSimple,
+        "class_encoder_test": hlax.models.GaussEncoder,
+    }
 
-    output = main(config)
+    output = main(config, dict_models)
 
-    config.pop("models")
     output["metadata"] = {
         "config": config,
         "timestamp": now,
