@@ -29,12 +29,14 @@ import chex
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
-from datetime import datetime
 from functools import partial
 from dataclasses import dataclass
 from flax.core import freeze, unfreeze
 from tqdm.auto import tqdm
 from flax.training.train_state import TrainState
+
+
+vmap_neg_iwmll = jax.vmap(hlax.training.neg_iwmll, (0, 0, None, 0, None, None, None))
 
 
 @dataclass
@@ -75,6 +77,12 @@ class TestConfig:
     tx: optax.GradientTransformation
     class_encoder: nn.Module # Unamortised
     class_decoder: nn.Module
+
+
+def load_dataset(n_train, n_test):
+    train, test = hlax.datasets.load_fashion_mnist(n_train, n_test)
+    X_train, X_test = train[0], test[0]
+    return X_train, X_test
 
 
 def setup(config, dict_models):
@@ -164,7 +172,11 @@ def warmup_vae(
             
             dict_params[f"e{enum}"] = params_decoder_vae
 
-    return dict_params, jnp.array(hist_loss)
+    output = {
+        "checkpoint_params": dict_params,
+        "hist_loss": jnp.array(hist_loss),
+    }
+    return output
 
 
 def warmup_hardem(
@@ -216,68 +228,66 @@ def warmup_hardem(
         
         if (enum := e + 1) in config.eval_epochs:
             dict_params[f"e{enum}"] = params_decoder
-    return dict_params, jnp.array(hist_loss)
-
-
-def load_dataset(n_train, n_test):
-    train, test = hlax.datasets.load_fashion_mnist(n_train, n_test)
-    X_train, X_test = train[0], test[0]
-    return X_train, X_test
+    
+    output = {
+        "checkpoint_params": dict_params,
+        "hist_loss": jnp.array(hist_loss),
+    }
+    return output
 
 
 def warmup_phase(key, X_train, config_vae, config_hardem):
     key_vae, key_hardem = jax.random.split(key)
 
     # Obtain inference model parameters
-    dict_params_vae, hist_loss_vae = warmup_vae(key_vae, config_vae, X_train)
-    dict_params_hardem, hist_loss_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
+    output_vae = warmup_vae(key_vae, config_vae, X_train)
+    output_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
 
     output =  {
         "vae": {
-            "checkpoint_params": dict_params_vae,
-            "hist_loss": hist_loss_vae,
+            **output_vae,
         },
         "hardem": {
-            "checkpoint_params": dict_params_hardem,
-            "hist_loss": hist_loss_hardem,
+            **output_hardem,
         },
     }
 
     return output
 
 
-def test_phase(key, X_test, config_test, output_warmup):
-    _, dim_obs = X_test.shape
+def test_single(key, config_test, output, X):
+    _, dim_obs = X.shape
+    key_train, key_eval= jax.random.split(key)
+    keys_eval = jax.random.split(key_eval, len(X))
 
     encoder_test = config_test.class_encoder(config_test.dim_latent)
     decoder_test = config_test.class_decoder(dim_obs, config_test.dim_latent)
 
-    key_train, key_eval= jax.random.split(key)
-    keys_eval = jax.random.split(key_eval, len(X_test))
+    checkpoint_vals = output["checkpoint_params"].keys()
+    dict_mll_epochs = {}
+    for keyv in tqdm(checkpoint_vals):
+        params_decoder = output["checkpoint_params"][keyv]
+        res = hlax.training.train_encoder(key_train, X, encoder_test, decoder_test,
+                                          params_decoder, config_test.tx, config_test.num_epochs,
+                                          config_test.num_is_samples, leave=False)
+        mll_values = -vmap_neg_iwmll(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, 50)
+        dict_mll_epochs[keyv] = mll_values
+    return dict_mll_epochs
 
-    vmap_neg_iwmll = jax.vmap(hlax.training.neg_iwmll, (0, 0, None, 0, None, None, None))
+
+def test_phase(key, X_test, config_test, output_warmup):
+    output_vae = output_warmup["vae"]
+    output_hardem = output_warmup["hardem"]
 
     dict_mll_epochs = {}
+    dict_mll_epochs_vae = test_single(key, config_test, output_vae, X_test)
+    dict_mll_epochs_hardem = test_single(key, config_test, output_hardem, X_test)
 
-    checkpoint_vals = output_warmup["hardem"]["checkpoint_params"].keys()
-    for keyv in tqdm(checkpoint_vals):
-        params_decoder_vae = output_warmup["vae"]["checkpoint_params"][keyv]
-        params_decoder_hem = output_warmup["hardem"]["checkpoint_params"][keyv]
-
-
-        vae_res = hlax.training.train_encoder(key_train, X_test, encoder_test, decoder_test,
-                                            params_decoder_vae, config_test.tx, config_test.num_epochs,
-                                            config_test.num_is_samples, leave=False)
-
-        hem_res = hlax.training.train_encoder(key_train, X_test, encoder_test, decoder_test,
-                                            params_decoder_hem, config_test.tx, config_test.num_epochs,
-                                            config_test.num_is_samples, leave=False)
-        
-        mll_vae = -vmap_neg_iwmll(keys_eval, vae_res["params"], params_decoder_vae, X_test, encoder_test, decoder_test, 50)
-        mll_hem = -vmap_neg_iwmll(keys_eval, hem_res["params"], params_decoder_hem, X_test, encoder_test, decoder_test, 50)
-        
-        mll_vals = np.c_[mll_hem, mll_vae]
-        dict_mll_epochs[keyv] = mll_vals 
+    for keyv in dict_mll_epochs_vae.keys():
+        mll_vals_vae = dict_mll_epochs_vae[keyv]
+        mll_vals_hardem = dict_mll_epochs_hardem[keyv]
+        mll_vals = np.c_[mll_vals_hardem, mll_vals_vae]
+        dict_mll_epochs[keyv] = mll_vals
     
     return dict_mll_epochs
 
@@ -292,7 +302,7 @@ def main(config, dict_models):
     train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
     X_train, X_test = train[0], test[0]
 
-    config_vae, config_hardem, config_test  = setup(config, dict_models)
+    config_vae, config_hardem, config_test = setup(config, dict_models)
 
     print("Warmup phase")
     warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem)
@@ -305,37 +315,3 @@ def main(config, dict_models):
     }
 
     return output
-
-
-if __name__ == "__main__":
-    import os
-    import sys
-    import tomli
-    import pickle
-    from datetime import datetime, timezone
-
-    os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
-    os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-    os.environ["TPU_VISIBLE_DEVICES"] = "1"
-
-    now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-
-    path_config = sys.argv[1]
-    with open(path_config, "rb") as f:
-        config = tomli.load(f)
-
-    dict_models = {
-        "class_decoder": hlax.models.DiagDecoder,
-        "class_encoder": hlax.models.EncoderSimple,
-        "class_encoder_test": hlax.models.GaussEncoder,
-    }
-
-    output = main(config, dict_models)
-
-    output["metadata"] = {
-        "config": config,
-        "timestamp": now,
-    }
-
-    with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
-        pickle.dump(output, f)
