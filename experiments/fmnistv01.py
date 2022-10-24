@@ -72,6 +72,7 @@ if __name__ == "__main__":
         "config": config,
         "timestamp": now,
         "name_file": name_file,
+        "path_config": path_config,
     }
 
     print(f"Saving {now}")
