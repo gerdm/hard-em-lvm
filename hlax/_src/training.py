@@ -40,38 +40,6 @@ def get_batch_train_ixs(key, num_samples, batch_size):
     return batch_ixs
 
 
-def neg_iwmll(key, params_encoder, params_decoder, observation,
-                      encoder, decoder, num_is_samples=10):
-    """
-    Importance-weighted marginal log-likelihood for an unamortised, uncoditional
-    gaussian encoder.
-    """
-    latent_samples, (mu_z, std_z) = encoder.apply(
-        params_encoder, key, num_samples=num_is_samples
-    )
-
-    _, dim_latent = latent_samples.shape
-    # log p(x|z)
-    mu_x, logvar_x = decoder.apply(params_decoder, latent_samples)
-    std_x = jnp.exp(logvar_x / 2)
-    log_px_cond = distrax.MultivariateNormalDiag(mu_x, std_x).log_prob(observation)
-    
-    # log p(z)
-    mu_z_init, std_z_init = jnp.zeros(dim_latent), jnp.ones(dim_latent)
-    log_pz = distrax.MultivariateNormalDiag(mu_z_init, std_z_init).log_prob(latent_samples)
-    
-    # log q(z)
-    log_qz = distrax.MultivariateNormalDiag(mu_z, std_z).log_prob(latent_samples)
-    
-    # Importance-weighted marginal log-likelihood
-    log_prob = log_pz + log_px_cond - log_qz
-    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples)
-    return niwmll
-
-
-grad_neg_iwmll_encoder = jax.value_and_grad(neg_iwmll, argnums=1)
-
-
 @partial(jax.vmap, in_axes=(0, 0, 0, 0, None, None, None, None, None, None))
 def update_encoder_parameters(key, params_encoder, opt_state, obs, params_decoder, tx,
                               encoder, decoder, grad_neg_iwmll, num_is_samples=10):

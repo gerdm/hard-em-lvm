@@ -193,7 +193,7 @@ def warmup_vae(
         )
 
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
-        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size)
+        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, hlax.losses.iwae)
 
         hist_loss.append(loss)        
         pbar.set_description(f"{loss=:.3e}")
