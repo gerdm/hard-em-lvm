@@ -1,3 +1,6 @@
+"""
+Hard-EM Latent Variable Model training
+"""
 import jax
 import hlax
 import optax
@@ -66,12 +69,12 @@ def train_step(params_decoder, z_est, opt_states, observations,
                             grad_m=grad_m, observations=observations,
                             tx=tx_params, model=model)
 
-    # E-step
+    # E-step (n_its_latent iterations)
     init_state = (opt_latent_state, params_decoder, z_est)
     final_state = jax.lax.fori_loop(0, n_its_latent, part_e_step, init_state)
     opt_latent_state, params_decoder, z_est = final_state
 
-    # M-step
+    # M-step (n_its_params iterations)
     init_state = (opt_params_state, params_decoder, z_est)
     final_state = jax.lax.fori_loop(0, n_its_params, part_m_step, init_state)
     opt_params_state, params_decoder, z_est = final_state
@@ -179,8 +182,8 @@ def reconstruct_full_adam_params(opt_state, opt_state_sub, ixs):
 
     opt_latent_state_new = (
         opt_latent_state[0]._replace(
-            mu = mu_update,
-            nu = nu_update
+            mu=mu_update,
+            nu=nu_update
         ),
     ) + opt_latent_state[1:]
 
