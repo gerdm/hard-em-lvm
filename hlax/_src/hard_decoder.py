@@ -4,7 +4,6 @@ Hard-EM Latent Variable Model training
 import jax
 import hlax
 import optax
-import distrax
 import jax.numpy as jnp
 from tqdm.auto import tqdm
 from functools import partial
@@ -17,13 +16,13 @@ def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
     batch_init = jnp.ones((n_train, dim_latent))
     params_decoder = model.init(key_init_params, batch_init)
     z_decoder = jax.random.normal(key_init_latent, (n_train, dim_latent))
-    
+
     opt_params_state = tx_params.init(params_decoder)
     opt_latent_state = tx_latent.init(z_decoder)
-    
+
     target_states = (params_decoder, z_decoder)
     opt_states = (opt_latent_state, opt_params_state)
-    
+
     return opt_states, target_states
 
 
