@@ -66,7 +66,9 @@ if __name__ == "__main__":
         "class_encoder_test": hlax.models.GaussEncoder,
     }
 
-    output = base_vae_hardem.main(config, dict_models)
+    lossfn_vae = hlax.losses.iwae
+    lossfn_hardem = hlax.losses.loss_hard_nmll
+    output = base_vae_hardem.main(config, dict_models, lossfn_vae, lossfn_hardem)
 
     output["metadata"] = {
         "config": config,

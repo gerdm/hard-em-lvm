@@ -18,7 +18,7 @@ We compare the performance of the two methods by evaluating
 the marginal likelihood p(x) = \int p(x|z) p(z) dz using
 the importance sampling estimator.
 
-ToDo:
+TODO:
 *  normailsed passing initialised or unititialised encoder / decoder
 """
 
@@ -29,6 +29,7 @@ import chex
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
+from typing import Callable
 from functools import partial
 from dataclasses import dataclass
 from flax.core import freeze, unfreeze
@@ -140,7 +141,8 @@ def setup(config, dict_models):
 def warmup_vae(
     key: chex.ArrayDevice,
     config: WarmupConfigVAE,
-    X: chex.ArrayDevice
+    X: chex.ArrayDevice,
+    lossfn: Callable,
 ):
     """
     Find inference model parameters theta
@@ -163,7 +165,7 @@ def warmup_vae(
         )
 
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
-        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, hlax.losses.iwae)
+        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, lossfn)
 
         hist_loss.append(loss)        
         pbar.set_description(f"{loss=:.3e}")
@@ -184,7 +186,8 @@ def warmup_vae(
 def warmup_hardem(
     key: chex.ArrayDevice,
     config: WarmupConfigHardEM,
-    X: chex.ArrayDevice
+    X: chex.ArrayDevice,
+    lossfn: Callable,
 ):
     """
     Find inference model parameters theta
@@ -194,7 +197,6 @@ def warmup_hardem(
     hist_loss = []
     _, dim_obs = X.shape
     decoder = config.class_decoder(dim_obs, config.dim_latent)
-    lossfn = hlax.losses.loss_hard_nmll
 
     key_init, key_step = jax.random.split(key)
     keys_step = jax.random.split(key_step, config.num_epochs)
@@ -238,12 +240,12 @@ def warmup_hardem(
     return output
 
 
-def warmup_phase(key, X_train, config_vae, config_hardem):
+def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem):
     key_vae, key_hardem = jax.random.split(key)
 
     # Obtain inference model parameters
-    output_vae = warmup_vae(key_vae, config_vae, X_train)
-    output_hardem = warmup_hardem(key_hardem, config_hardem, X_train)
+    output_vae = warmup_vae(key_vae, config_vae, X_train, lossfn_vae)
+    output_hardem = warmup_hardem(key_hardem, config_hardem, X_train, lossfn_hardem)
 
     output =  {
         "vae": {
@@ -295,7 +297,7 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(config, dict_models):
+def main(config, dict_models, lossfn_vae, lossfn_hardem):
     num_train = config["warmup"]["num_obs"]
     num_test = config["test"]["num_obs"]
 
@@ -308,7 +310,7 @@ def main(config, dict_models):
     config_vae, config_hardem, config_test = setup(config, dict_models)
 
     print("Warmup phase")
-    warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem)
+    warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem)
     print("Test phase")
     test_output = test_phase(key_eval, X_test, config_test, warmup_output)
 
