@@ -52,14 +52,14 @@ def neg_iwmll(key, params_encoder, params_decoder, observation,
     mu_x, logvar_x = decoder.apply(params_decoder, latent_samples)
     std_x = jnp.exp(logvar_x / 2)
     log_px_cond = distrax.MultivariateNormalDiag(mu_x, std_x).log_prob(observation)
-    
+
     # log p(z)
     mu_z_init, std_z_init = jnp.zeros(dim_latent), jnp.ones(dim_latent)
     log_pz = distrax.MultivariateNormalDiag(mu_z_init, std_z_init).log_prob(latent_samples)
-    
+
     # log q(z)
     log_qz = distrax.MultivariateNormalDiag(mu_z, std_z).log_prob(latent_samples)
-    
+
     # Importance-weighted marginal log-likelihood
     log_prob = log_pz + log_px_cond - log_qz
     niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples)
@@ -142,7 +142,7 @@ def setup(config, dict_models):
         class_encoder=Encoder,
         class_decoder=Decoder,
     )
-    
+
     config_hardem = WarmupConfigHardEM(
         num_epochs=config["warmup"]["num_epochs"],
         batch_size=config["warmup"]["batch_size"],
@@ -197,11 +197,11 @@ def warmup_vae(
 
         hist_loss.append(loss)        
         pbar.set_description(f"{loss=:.3e}")
-        
+
         if (enum := e + 1) in config.eval_epochs:
             params_vae = state.params
             params_decoder_vae = freeze({"params": unfreeze(params_vae)["params"]["decoder"]})
-            
+
             dict_params[f"e{enum}"] = params_decoder_vae
 
     output = {
@@ -224,7 +224,7 @@ def warmup_hardem(
     hist_loss = []
     _, dim_obs = X.shape
     decoder = config.class_decoder(dim_obs, config.dim_latent)
-    lossfn = hlax.hard_decoder.loss_hard_nmll
+    lossfn = hlax.losses.loss_hard_nmll
 
     key_init, key_step = jax.random.split(key)
     keys_step = jax.random.split(key_step, config.num_epochs)
@@ -257,10 +257,10 @@ def warmup_hardem(
         nll, params_decoder, z_est, opt_states = res
         hist_loss.append(nll)
         pbar.set_description(f"{nll=:.3e}")
-        
+
         if (enum := e + 1) in config.eval_epochs:
             dict_params[f"e{enum}"] = params_decoder
-    
+
     output = {
         "checkpoint_params": dict_params,
         "hist_loss": jnp.array(hist_loss),
@@ -321,7 +321,7 @@ def test_phase(key, X_test, config_test, output_warmup):
         mll_vals_hardem = dict_mll_epochs_hardem[keyv]
         mll_vals = np.c_[mll_vals_hardem, mll_vals_vae]
         dict_mll_epochs[keyv] = mll_vals
-    
+
     return dict_mll_epochs
 
 
