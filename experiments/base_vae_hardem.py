@@ -26,7 +26,6 @@ import jax
 import hlax
 import optax
 import chex
-import distrax
 import numpy as np
 import jax.numpy as jnp
 import flax.linen as nn
