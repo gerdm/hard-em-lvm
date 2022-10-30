@@ -4,15 +4,15 @@ import hlax
 import sys
 import tomli
 import pickle
-import numpy as np
 import base_vae_hardem
+import numpy as np
 import flax.linen as nn
 from datetime import datetime, timezone
 from typing import Sequence, Tuple
 
 os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
 os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_VISIBLE_DEVICES"] = "0"
+os.environ["TPU_VISIBLE_DEVICES"] = "2"
 
 
 class Decoder(nn.Module):
@@ -36,7 +36,7 @@ class Decoder(nn.Module):
         H, W = H // factor, W // factor
 
         X = nn.Dense(H * W * self.hidden_channels[-1])(X)
-        X = jax.nn.elu(X)
+        X = nn.elu(X)
         X = X.reshape((-1, H, W, self.hidden_channels[-1]))
 
         for hidden_channel in reversed(self.hidden_channels[:-1]):
@@ -44,7 +44,7 @@ class Decoder(nn.Module):
                 hidden_channel, (3, 3), strides=(2, 2), padding=((1, 2), (1, 2))
             )(X)
             X = nn.BatchNorm(use_running_average=not training)(X)
-            X = jax.nn.elu(X)
+            X = nn.elu(X)
 
         X = nn.ConvTranspose(C, (3, 3), strides=(2, 2), padding=((1, 2), (1, 2)))(X)
         return X
@@ -59,7 +59,7 @@ class Encoder(nn.Module):
         for channel in self.hidden_channels:
             X = nn.Conv(channel, (3, 3), strides=2, padding=1)(X)
             X = nn.BatchNorm(use_running_average=not training)(X)
-            X = jax.nn.relu(X)
+            X = nn.elu(X)
 
         X = X.reshape((-1, np.prod(X.shape[-3:])))
         mu = nn.Dense(self.latent_dim)(X)
@@ -86,13 +86,31 @@ if __name__ == "__main__":
         "class_decoder": Decoder,
         "class_encoder": Encoder,   
         "class_encoder_test": hlax.models.GaussEncoder,
-        "class_vae": hlax.models.VAEBern,
+        "class_vae": hlax.models.VAEGauss,
     }
 
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
-    output = base_vae_hardem.main(config, X_warmup, X_test, dict_models, lossfn_vae, lossfn_hardem)
+
+    _, *dim_obs = X_warmup.shape
+    dim_latent = config["setup"]["dim_latent"]
+    model_vae = hlax.models.VAEBern(dim_latent, dim_obs, Encoder, Decoder)
+    model_decoder = Decoder(dim_obs, dim_latent)
+    model_encoder_test = hlax.models.GaussEncoder(dim_latent)
+
+    output = base_vae_hardem.main(
+        key,
+        X_warmup,
+        X_test,
+        config,
+        model_vae,
+        model_decoder,
+        model_encoder_test,
+        lossfn_vae,
+        lossfn_hardem,
+    )
+
 
     output["metadata"] = {
         "config": config,
@@ -104,3 +122,4 @@ if __name__ == "__main__":
     print(f"Saving {now}")
     with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
         pickle.dump(output, f)
+
