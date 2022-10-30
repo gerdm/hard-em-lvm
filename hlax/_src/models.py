@@ -24,7 +24,7 @@ class FADecoder(nn.Module):
     def eval_mean(self, z):
         mean_x = jnp.einsum("...m,dm->...d", z, self.A)+ self.b
         return mean_x
-    
+
     def eval_diag_cov(self, z):
         # logvar_x = jnp.einsum("...m,dm->...d", z, self.logPsi)
         zeros = jnp.zeros((self.dim_obs, self.dim_latent))
@@ -35,9 +35,9 @@ class FADecoder(nn.Module):
     def __call__(self, z):
         mean_x = self.eval_mean(z)
         logvar_x = self.eval_diag_cov(z)
-        
+
         return mean_x, logvar_x
-    
+
 
 class HomkDecoder(nn.Module):
     """
@@ -49,10 +49,10 @@ class HomkDecoder(nn.Module):
     dim_latent: int = 20
     normal_init: Callable = nn.initializers.normal()
     activation = nn.relu
-    
+
     def setup(self):
         self.logPsi = self.param("logPsi", self.normal_init, (self.dim_obs,))
-    
+
     def eval_diag_cov(self, z):
         # logvar_x = jnp.einsum("...m,dm->...d", z, self.logPsi)
         zeros = jnp.zeros((self.dim_obs, self.dim_latent))
@@ -66,7 +66,7 @@ class HomkDecoder(nn.Module):
         x = self.activation(x)
         mean_x = nn.Dense(self.dim_obs, use_bias=True)(x)
         logvar_x = self.eval_diag_cov(z)
-        
+
         return mean_x, logvar_x
 
 
@@ -77,19 +77,19 @@ class DiagDecoder(nn.Module):
     """
     dim_full: int
     dim_latent: int = 20
-    
+
     def setup(self):
         self.activation = nn.tanh
         self.hidden = nn.Dense(20, name="hidden")
         self.mean = nn.Dense(self.dim_full, use_bias=True, name="mean")
         self.logvar = nn.Dense(self.dim_full, use_bias=False, name="logvar")
-    
+
     def __call__(self, z):
         x = self.hidden(z)
         x = self.activation(x)
         mean_x = self.mean(x)
         logvar_x = self.logvar(x)
-        return mean_x, logvar_x 
+        return mean_x, logvar_x
 
 
 class EncoderFullCov(nn.Module):
@@ -109,12 +109,13 @@ class EncoderFullCov(nn.Module):
 
     @nn.compact
     def __call__(self, x):
+        raise NotImplementedError("Not implemented yet")
         z = nn.Dense(self.n_hidden, name="latent_hiddent_1")(x)
         z = nn.relu(z)
 
         mean_z = self.mean_layer(z)
         logvar_z = self.logvardiag_layer(z)
-        
+
         diag_z = jax.vmap(jnp.diag)(jnp.exp(logvar_z / 2))
         # diag_z = jnp.diag(jnp.exp(logvar_z / 2))
         Lz = self.tril_layer(z)
@@ -150,7 +151,7 @@ class EncoderSimple(nn.Module):
     """
     latent_dim: int
     n_hidden: int = 5
-    
+
     @nn.compact
     def __call__(self, x):
         z = nn.Dense(self.n_hidden)(x)
@@ -171,19 +172,47 @@ class VAEGauss(nn.Module):
     obs_dim: int
     Encoder: nn.Module
     Decoder: nn.Module
-    
+
     def reparameterise(self, key, mean, logvar, num_samples=1):
         std = jnp.exp(logvar / 2)
         eps = jax.random.normal(key, (num_samples, *logvar.shape))
         z = mean[None, ...] + jnp.einsum("...d,...d->...d", std, eps)
         return z
-    
+
     def setup(self):
         self.encoder = self.Encoder(self.latent_dim)
         self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
-    
+
     def __call__(self, x, key_eps, num_samples=1):
         mean_z, logvar_z = self.encoder(x)
         z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
         mean_x, logvar_x = self.decoder(z)
         return z, (mean_z, logvar_z), (mean_x, logvar_x)
+
+
+class VAEBern(nn.Module):
+    """
+    Base class for a variational autoencoder
+    with Bernoulli decoder p(x|z) = Bern(x| f(z))
+    and Gaussian encoder q(z|x) = N(z|mu(x), sigma(x))
+    """
+    latent_dim: int
+    obs_dim: int
+    Encoder: nn.Module
+    Decoder: nn.Module
+
+    def reparameterise(self, key, mean, logvar, num_samples=1):
+        std = jnp.exp(logvar / 2)
+        eps = jax.random.normal(key, (num_samples, *logvar.shape))
+        z = mean[None, ...] + jnp.einsum("...d,...d->...d", std, eps)
+        return z
+
+    def setup(self):
+        self.encoder = self.Encoder(self.latent_dim)
+        self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
+
+    def __call__(self, x, key_eps, num_samples=1):
+        mean_z, logvar_z = self.encoder(x)
+        z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
+        logit_mean_x = self.decoder(z)
+        return z, (mean_z, logvar_z), logit_mean_x

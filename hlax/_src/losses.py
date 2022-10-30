@@ -36,6 +36,37 @@ def iwae(key, params, apply_fn, X_batch):
     return niwmll
 
 
+def iwae_bern(key, params, apply_fn, X_batch):
+    """
+    Importance-weighted marginal log-likelihood for
+    a Bernoulli decoder
+    """
+    batch_size = len(X_batch)
+    keys = jax.random.split(key, batch_size)
+
+    encode_decode = jax.vmap(apply_fn, (None, 0, 0))
+    encode_decode = encode_decode(params, X_batch, keys)
+    z, (mean_z, logvar_z), logit_mean_x = encode_decode
+    _, num_is_samples, dim_latent = z.shape
+
+    std_z = jnp.exp(logvar_z / 2)
+
+    dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(dim_latent),
+                                                jnp.ones(dim_latent))
+    dist_decoder = distrax.Bernoulli(logits=logit_mean_x)
+    dist_posterior = distrax.Normal(mean_z[:, None, :], std_z[:, None, :])
+
+    log_prob_z_prior = dist_prior.log_prob(z)
+    log_prob_x = dist_decoder.log_prob(X_batch[:, None, :])
+    log_prob_z_post = dist_posterior.log_prob(z).sum(axis=-1)
+
+    log_prob = log_prob_z_prior + log_prob_x - log_prob_z_post
+
+    # negative Importance-weighted marginal log-likelihood
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).mean()
+    return niwmll
+
+
 def loss_hard_nmll(params, z_batch, X_batch, model):
     """
     Loss function
@@ -78,7 +109,6 @@ def neg_iwmll(key, params_encoder, params_decoder, observation,
     """
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
     gaussian encoder.
-    Loss defined for the test phase of the experiments
     """
     latent_samples, (mu_z, std_z) = encoder.apply(
         params_encoder, key, num_samples=num_is_samples
