@@ -64,6 +64,7 @@ if __name__ == "__main__":
         "class_decoder": Decoder,
         "class_encoder": Encoder,   
         "class_encoder_test": hlax.models.GaussEncoder,
+        "class_vae": hlax.models.VAEGauss,
     }
 
     lossfn_vae = hlax.losses.iwae

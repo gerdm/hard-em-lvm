@@ -162,9 +162,10 @@ class EncoderSimple(nn.Module):
         return mean_z, logvar_z
 
 
-class VAE_IW(nn.Module):
+class VAEGauss(nn.Module):
     """
-    Importance-Weighted Variational Autoencoder
+    Base class for variational autoencoder with
+    gaussian decoder p(x|z) and gaussian encoder p(z|x)
     """
     latent_dim: int
     obs_dim: int

@@ -17,9 +17,6 @@ for each n=1,...,N using the IWAE estimator.
 We compare the performance of the two methods by evaluating
 the marginal likelihood p(x) = \int p(x|z) p(z) dz using
 the importance sampling estimator.
-
-TODO:
-*  normailsed passing initialised or unititialised encoder / decoder
 """
 
 import jax
@@ -54,6 +51,7 @@ class WarmupConfigVAE:
 
     class_decoder: nn.Module
     class_encoder: nn.Module
+    class_vae: nn.Module
 
 
 @dataclass
@@ -95,6 +93,8 @@ def setup(config, dict_models):
     Encoder = dict_models["class_encoder"]
     EncoderTest = dict_models["class_encoder_test"]
 
+    VAE = dict_models["class_vae"]
+
     learning_rate = config["warmup"]["learning_rate"]
     learning_rate_test = config["warmup"]["learning_rate"]
 
@@ -112,6 +112,7 @@ def setup(config, dict_models):
         tx_vae=tx_vae,
         class_encoder=Encoder,
         class_decoder=Decoder,
+        class_vae=VAE,
     )
 
     config_hardem = WarmupConfigHardEM(
@@ -155,7 +156,7 @@ def warmup_vae(
     keys_train = jax.random.split(key_train, config.num_epochs)
     batch_init = jnp.ones((config.batch_size, dim_obs))
 
-    model = hlax.models.VAE_IW(config.dim_latent, dim_obs, config.class_encoder, config.class_decoder)
+    model = config.class_vae(config.dim_latent, dim_obs, config.class_encoder, config.class_decoder)
     params_init = model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
     state = TrainState.create(
@@ -167,8 +168,8 @@ def warmup_vae(
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
         loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, lossfn)
 
-        hist_loss.append(loss)        
-        pbar.set_description(f"{loss=:.3e}")
+        hist_loss.append(loss)
+        pbar.set_description(f"vae-{loss=:.3e}")
 
         if (enum := e + 1) in config.eval_epochs:
             params_vae = state.params
@@ -226,9 +227,9 @@ def warmup_hardem(
             config.num_its_params, config.num_its_latent,
             lossfn
         )
-        nll, params_decoder, z_est, opt_states = res
-        hist_loss.append(nll)
-        pbar.set_description(f"{nll=:.3e}")
+        loss, params_decoder, z_est, opt_states = res
+        hist_loss.append(loss)
+        pbar.set_description(f"hEM-{loss=:.3e}")
 
         if (enum := e + 1) in config.eval_epochs:
             dict_params[f"e{enum}"] = params_decoder
