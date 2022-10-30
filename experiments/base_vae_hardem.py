@@ -39,9 +39,10 @@ grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll, argnums=1)
 vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll, (0, 0, None, 0, None, None, None))
 
 
-# TODO: Pass instance of VAE class instead of class (?)
 @dataclass
 class WarmupConfigVAE:
+    model_vae: nn.Module
+
     num_epochs: int
     batch_size: int
     dim_latent: int
@@ -50,14 +51,11 @@ class WarmupConfigVAE:
     tx_vae: optax.GradientTransformation
     num_is_samples: int
 
-    class_decoder: nn.Module
-    class_encoder: nn.Module
-    class_vae: nn.Module
 
-
-# TODO: Pass instance of class decoder (?)
 @dataclass
 class WarmupConfigHardEM:
+    model_decoder: nn.Module
+
     num_epochs: int
     batch_size: int
     dim_latent: int
@@ -69,8 +67,6 @@ class WarmupConfigHardEM:
     tx_params: optax.GradientTransformation
     tx_latent: optax.GradientTransformation
 
-    class_decoder: nn.Module
-
 
 @dataclass
 class TestConfig:
@@ -78,8 +74,8 @@ class TestConfig:
     num_is_samples: int
     dim_latent: int
     tx: optax.GradientTransformation
-    class_encoder: nn.Module # Unamortised
-    class_decoder: nn.Module
+    model_encoder: nn.Module # Unamortised
+    model_decoder: nn.Module
 
 
 def load_dataset(n_train, n_test):
@@ -88,15 +84,7 @@ def load_dataset(n_train, n_test):
     return X_train, X_test
 
 
-def setup(config, dict_models):
-    # q(z|x)
-    Decoder = dict_models["class_decoder"]
-    # p(x|z)
-    Encoder = dict_models["class_encoder"]
-    EncoderTest = dict_models["class_encoder_test"]
-
-    VAE = dict_models["class_vae"]
-
+def setup(config, model_vae, model_decoder, model_encoder_test):
     learning_rate = config["warmup"]["learning_rate"]
     learning_rate_test = config["warmup"]["learning_rate"]
 
@@ -108,34 +96,32 @@ def setup(config, dict_models):
     config_vae = WarmupConfigVAE(
         num_epochs=config["warmup"]["num_epochs"],
         batch_size=config["warmup"]["batch_size"],
-        dim_latent=config["warmup"]["dim_latent"],
+        dim_latent=config["setup"]["dim_latent"],
         eval_epochs=config["warmup"]["eval_epochs"],
         num_is_samples=config["warmup"]["vae"]["num_is_samples"],
         tx_vae=tx_vae,
-        class_encoder=Encoder,
-        class_decoder=Decoder,
-        class_vae=VAE,
+        model_vae=model_vae,
     )
 
     config_hardem = WarmupConfigHardEM(
         num_epochs=config["warmup"]["num_epochs"],
         batch_size=config["warmup"]["batch_size"],
-        dim_latent=config["warmup"]["dim_latent"],
+        dim_latent=config["setup"]["dim_latent"],
         eval_epochs=config["warmup"]["eval_epochs"],
         num_its_params=config["warmup"]["hard_em"]["num_its_params"],
         num_its_latent=config["warmup"]["hard_em"]["num_its_latent"],
         tx_params=tx_params,
         tx_latent=tx_latent,
-        class_decoder=Decoder,
+        model_decoder=model_decoder,
     )
 
     config_test = TestConfig(
         num_epochs=config["test"]["num_epochs"],
         num_is_samples=config["test"]["num_is_samples"],
-        dim_latent=config["warmup"]["dim_latent"],
+        dim_latent=config["setup"]["dim_latent"],
         tx=tx_test,
-        class_encoder=EncoderTest,
-        class_decoder=Decoder,
+        model_encoder=model_encoder_test,
+        model_decoder=model_decoder,
     )
 
     return config_vae, config_hardem, config_test
@@ -152,13 +138,13 @@ def warmup_vae(
     """
     dict_params = {}
     hist_loss = []
-    _, dim_obs = X.shape
+    _, *dim_obs = X.shape
 
     key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
     keys_train = jax.random.split(key_train, config.num_epochs)
-    batch_init = jnp.ones((config.batch_size, dim_obs))
+    batch_init = jnp.ones((config.batch_size, *dim_obs))
 
-    model = config.class_vae(config.dim_latent, dim_obs, config.class_encoder, config.class_decoder)
+    model = config.model_vae
     params_init = model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
     state = TrainState.create(
@@ -198,8 +184,7 @@ def warmup_hardem(
     """
     dict_params = {}
     hist_loss = []
-    _, dim_obs = X.shape
-    decoder = config.class_decoder(dim_obs, config.dim_latent)
+    decoder = config.model_decoder
 
     key_init, key_step = jax.random.split(key)
     keys_step = jax.random.split(key_step, config.num_epochs)
@@ -262,13 +247,12 @@ def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_har
     return output
 
 
-def test_single(key, config_test, output, X):
-    _, dim_obs = X.shape
+def test_single(key, config_test, output, X, num_is_samples=50):
     key_train, key_eval= jax.random.split(key)
     keys_eval = jax.random.split(key_eval, len(X))
 
-    encoder_test = config_test.class_encoder(config_test.dim_latent)
-    decoder_test = config_test.class_decoder(dim_obs, config_test.dim_latent)
+    encoder_test = config_test.model_encoder
+    decoder_test = config_test.model_decoder
 
     checkpoint_vals = output["checkpoint_params"].keys()
     dict_mll_epochs = {}
@@ -278,7 +262,7 @@ def test_single(key, config_test, output, X):
                                           params_decoder, config_test.tx, config_test.num_epochs,
                                           grad_neg_iwmll_encoder, config_test.num_is_samples,
                                           leave=False)
-        mll_values = -vmap_neg_iwmll(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, 50)
+        mll_values = -vmap_neg_iwmll(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, num_is_samples)
         dict_mll_epochs[keyv] = mll_values
     return dict_mll_epochs
 
@@ -300,9 +284,19 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(key, X_train, X_test, config, dict_models, lossfn_vae, lossfn_hardem):
+def main(
+    key: chex.ArrayDevice,
+    X_train: chex.ArrayDevice,
+    X_test: chex.ArrayDevice,
+    config: dict,
+    model_vae: nn.Module,
+    model_decoder: nn.Module,
+    model_encoder_test: nn.Module,
+    lossfn_vae: Callable,
+    lossfn_hardem: Callable,
+):
     key_warmup, key_eval = jax.random.split(key)
-    config_vae, config_hardem, config_test = setup(config, dict_models)
+    config_vae, config_hardem, config_test = setup(config, model_vae, model_decoder, model_encoder_test)
 
     print("Warmup phase")
     warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem)

@@ -76,7 +76,25 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
-    output = base_vae_hardem.main(key, X_warmup, X_test, config, dict_models, lossfn_vae, lossfn_hardem)
+
+    _, dim_obs = X_warmup.shape
+    dim_latent = config["setup"]["dim_latent"]
+    model_vae = hlax.models.VAEGauss(dim_latent, dim_obs, Encoder, Decoder)
+    model_decoder = Decoder(dim_obs, dim_latent)
+    model_encoder_test = hlax.models.GaussEncoder(dim_latent)
+
+    output = base_vae_hardem.main(
+        key,
+        X_warmup,
+        X_test,
+        config,
+        model_vae,
+        model_decoder,
+        model_encoder_test,
+        lossfn_vae,
+        lossfn_hardem,
+    )
+
 
     output["metadata"] = {
         "config": config,

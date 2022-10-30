@@ -1,10 +1,11 @@
 # TOML file for a fashion mnist dataset
+[setup]
+dim_latent = 50
 
 [warmup]
     num_obs = 10000
     num_epochs = 1000
     batch_size = 200
-    dim_latent = 50
     eval_epochs = [2, 10, 100, 250, 500, 1000]
     learning_rate = 1e-3 # For VAE and HardEM
 
