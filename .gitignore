@@ -3,6 +3,7 @@
 *.pdf
 *.npy
 *.pkl
+.vscode/
 
 # LATEX STUFF
 ## Core latex/pdflatex auxiliary files:
