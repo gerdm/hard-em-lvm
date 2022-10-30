@@ -78,6 +78,7 @@ def neg_iwmll(key, params_encoder, params_decoder, observation,
     """
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
     gaussian encoder.
+    Loss defined for the test phase of the experiments
     """
     latent_samples, (mu_z, std_z) = encoder.apply(
         params_encoder, key, num_samples=num_is_samples
