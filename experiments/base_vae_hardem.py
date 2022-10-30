@@ -39,6 +39,7 @@ grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll, argnums=1)
 vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll, (0, 0, None, 0, None, None, None))
 
 
+# TODO: Pass instance of VAE class instead of class (?)
 @dataclass
 class WarmupConfigVAE:
     num_epochs: int
@@ -54,6 +55,7 @@ class WarmupConfigVAE:
     class_vae: nn.Module
 
 
+# TODO: Pass instance of class decoder (?)
 @dataclass
 class WarmupConfigHardEM:
     num_epochs: int
@@ -298,11 +300,10 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(config, dict_models, lossfn_vae, lossfn_hardem):
+def main(key, config, dict_models, lossfn_vae, lossfn_hardem):
     num_train = config["warmup"]["num_obs"]
     num_test = config["test"]["num_obs"]
 
-    key = jax.random.PRNGKey(314)
     key_warmup, key_eval = jax.random.split(key)
 
     train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)

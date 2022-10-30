@@ -1,5 +1,6 @@
-import hlax
 import os
+import jax
+import hlax
 import sys
 import tomli
 import pickle
@@ -67,6 +68,7 @@ if __name__ == "__main__":
         "class_vae": hlax.models.VAEGauss,
     }
 
+    key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
     output = base_vae_hardem.main(config, dict_models, lossfn_vae, lossfn_hardem)
