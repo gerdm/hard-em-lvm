@@ -300,15 +300,8 @@ def test_phase(key, X_test, config_test, output_warmup):
     return dict_mll_epochs
 
 
-def main(key, config, dict_models, lossfn_vae, lossfn_hardem):
-    num_train = config["warmup"]["num_obs"]
-    num_test = config["test"]["num_obs"]
-
+def main(key, X_train, X_test, config, dict_models, lossfn_vae, lossfn_hardem):
     key_warmup, key_eval = jax.random.split(key)
-
-    train, test = hlax.datasets.load_fashion_mnist(num_train, num_test)
-    X_train, X_test = train[0], test[0]
-
     config_vae, config_hardem, config_test = setup(config, dict_models)
 
     print("Warmup phase")

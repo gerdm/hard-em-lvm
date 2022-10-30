@@ -61,6 +61,11 @@ if __name__ == "__main__":
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
+    num_warmup = config["warmup"]["num_obs"]
+    num_test = config["test"]["num_obs"]
+    warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test)
+    X_warmup, X_test = warmup[0], test[0]
+
     dict_models = {
         "class_decoder": Decoder,
         "class_encoder": Encoder,   
@@ -71,7 +76,7 @@ if __name__ == "__main__":
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
-    output = base_vae_hardem.main(config, dict_models, lossfn_vae, lossfn_hardem)
+    output = base_vae_hardem.main(key, X_warmup, X_test, config, dict_models, lossfn_vae, lossfn_hardem)
 
     output["metadata"] = {
         "config": config,
