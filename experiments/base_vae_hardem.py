@@ -34,11 +34,6 @@ from tqdm.auto import tqdm
 from flax.training.train_state import TrainState
 
 
-# TODO: loss function and gradient should not be hardcoded
-grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll, argnums=1)
-vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll, (0, 0, None, 0, None, None, None))
-
-
 @dataclass
 class WarmupConfigVAE:
     model_vae: nn.Module
@@ -232,8 +227,8 @@ def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_har
     key_vae, key_hardem = jax.random.split(key)
 
     # Obtain inference model parameters
-    output_vae = warmup_vae(key_vae, config_vae, X_train, lossfn_vae)
     output_hardem = warmup_hardem(key_hardem, config_hardem, X_train, lossfn_hardem)
+    output_vae = warmup_vae(key_vae, config_vae, X_train, lossfn_vae)
 
     output =  {
         "vae": {
@@ -247,7 +242,7 @@ def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_har
     return output
 
 
-def test_single(key, config_test, output, X, num_is_samples=50):
+def test_single(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
     key_train, key_eval= jax.random.split(key)
     keys_eval = jax.random.split(key_eval, len(X))
 
@@ -260,20 +255,20 @@ def test_single(key, config_test, output, X, num_is_samples=50):
         params_decoder = output["checkpoint_params"][keyv]
         res = hlax.training.train_encoder(key_train, X, encoder_test, decoder_test,
                                           params_decoder, config_test.tx, config_test.num_epochs,
-                                          grad_neg_iwmll_encoder, config_test.num_is_samples,
+                                          grad_loss_encoder, config_test.num_is_samples,
                                           leave=False)
-        mll_values = -vmap_neg_iwmll(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, num_is_samples)
+        mll_values = -vmap_loss_encoder(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, num_is_samples)
         dict_mll_epochs[keyv] = mll_values
     return dict_mll_epochs
 
 
-def test_phase(key, X_test, config_test, output_warmup):
+def test_phase(key, X_test, config_test, output_warmup, grad_loss_encoder, vmap_loss_encoder):
     output_vae = output_warmup["vae"]
     output_hardem = output_warmup["hardem"]
 
     dict_mll_epochs = {}
-    dict_mll_epochs_vae = test_single(key, config_test, output_vae, X_test)
-    dict_mll_epochs_hardem = test_single(key, config_test, output_hardem, X_test)
+    dict_mll_epochs_vae = test_single(key, config_test, output_vae, X_test, grad_loss_encoder, vmap_loss_encoder)
+    dict_mll_epochs_hardem = test_single(key, config_test, output_hardem, X_test, grad_loss_encoder, vmap_loss_encoder)
 
     for keyv in dict_mll_epochs_vae.keys():
         mll_vals_vae = dict_mll_epochs_vae[keyv]
@@ -294,6 +289,8 @@ def main(
     model_encoder_test: nn.Module,
     lossfn_vae: Callable,
     lossfn_hardem: Callable,
+    grad_loss_encoder: Callable,
+    vmap_loss_encoder: Callable,
 ):
     key_warmup, key_eval = jax.random.split(key)
     config_vae, config_hardem, config_test = setup(config, model_vae, model_decoder, model_encoder_test)
@@ -301,7 +298,7 @@ def main(
     print("Warmup phase")
     warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem)
     print("Test phase")
-    test_output = test_phase(key_eval, X_test, config_test, warmup_output)
+    test_output = test_phase(key_eval, X_test, config_test, warmup_output, grad_loss_encoder, vmap_loss_encoder)
 
     output = {
         "warmup": warmup_output,

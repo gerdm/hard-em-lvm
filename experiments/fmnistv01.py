@@ -77,6 +77,9 @@ if __name__ == "__main__":
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
 
+    grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll_bern, argnums=1)
+    vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll_bern, (0, 0, None, 0, None, None, None))
+
     _, dim_obs = X_warmup.shape
     dim_latent = config["setup"]["dim_latent"]
     model_vae = hlax.models.VAEGauss(dim_latent, dim_obs, Encoder, Decoder)
@@ -93,6 +96,8 @@ if __name__ == "__main__":
         model_encoder_test,
         lossfn_vae,
         lossfn_hardem,
+        grad_neg_iwmll_encoder,
+        vmap_neg_iwmll,
     )
 
 
@@ -106,4 +111,3 @@ if __name__ == "__main__":
     print(f"Saving {now}")
     with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
         pickle.dump(output, f)
-

@@ -12,7 +12,7 @@ from typing import Sequence, Tuple, List
 
 os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
 os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_VISIBLE_DEVICES"] = "2"
+os.environ["TPU_VISIBLE_DEVICES"] = "0"
 
 class Decoder(nn.Module):
     """
@@ -73,7 +73,7 @@ class ConvEncoder(nn.Module):
     @nn.compact
     def __call__(self, x):
         z = nn.Conv(5, (3, 3), padding="SAME")(x)
-        z = nn.tanh(z)
+        z = nn.elu(z)
         z = nn.max_pool(z, (2, 2), padding="SAME")
         z = z.reshape((z.shape[0], -1))
         z = nn.Dense(self.latent_dim)(z)
@@ -91,9 +91,9 @@ class ConvDecoder(nn.Module):
     def __call__(self, z):
         x = nn.Dense(28 ** 2)(z)
         x = x.reshape(*z.shape[:-1], *(28, 28, 1))
-        x = nn.tanh(x)
+        x = nn.elu(x)
         x = nn.Conv(5, (3, 3), padding="SAME")(x)
-        x = nn.tanh(x)
+        x = nn.elu(x)
         x = nn.Conv(1, (3, 3), padding="SAME")(x)
         return x
 
@@ -138,6 +138,9 @@ if __name__ == "__main__":
     lossfn_vae = hlax.losses.iwae_bern
     lossfn_hardem = hlax.losses.hard_nmll_bern
 
+    grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll_bern, argnums=1)
+    vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll_bern, (0, 0, None, 0, None, None, None))
+
     _, *dim_obs = X_warmup.shape
     dim_latent = config["setup"]["dim_latent"]
     model_vae = hlax.models.VAEBern(dim_latent, dim_obs, ConvEncoder, ConvDecoder)
@@ -154,6 +157,8 @@ if __name__ == "__main__":
         model_encoder_test,
         lossfn_vae,
         lossfn_hardem,
+        grad_neg_iwmll_encoder,
+        vmap_neg_iwmll,
     )
 
 
