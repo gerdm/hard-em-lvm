@@ -8,7 +8,7 @@ import base_vae_hardem
 import numpy as np
 import flax.linen as nn
 from datetime import datetime, timezone
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, List
 
 os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
 os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
@@ -68,12 +68,12 @@ class Encoder(nn.Module):
 
 
 class ConvEncoder(nn.Module):
-    latent_dim: tuple
+    latent_dim: Tuple
 
     @nn.compact
     def __call__(self, x):
         z = nn.Conv(5, (3, 3), padding="SAME")(x)
-        z = nn.elu(z)
+        z = nn.tanh(z)
         z = nn.max_pool(z, (2, 2), padding="SAME")
         z = z.reshape((z.shape[0], -1))
         z = nn.Dense(self.latent_dim)(z)
@@ -84,16 +84,16 @@ class ConvEncoder(nn.Module):
 
 
 class ConvDecoder(nn.Module):
-    dim_obs: Tuple
+    dim_obs: List
     dim_latent: int
 
     @nn.compact
     def __call__(self, z):
         x = nn.Dense(28 ** 2)(z)
-        x = x.reshape(*z.shape[:-1], *self.dim_obs)
-        x = nn.elu(x)
+        x = x.reshape(*z.shape[:-1], *(28, 28, 1))
+        x = nn.tanh(x)
         x = nn.Conv(5, (3, 3), padding="SAME")(x)
-        x = nn.elu(x)
+        x = nn.tanh(x)
         x = nn.Conv(1, (3, 3), padding="SAME")(x)
         return x
 
@@ -136,12 +136,12 @@ if __name__ == "__main__":
 
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae_bern
-    lossfn_hardem = hlax.losses.loss_hard_nmll
+    lossfn_hardem = hlax.losses.hard_nmll_bern
 
     _, *dim_obs = X_warmup.shape
     dim_latent = config["setup"]["dim_latent"]
     model_vae = hlax.models.VAEBern(dim_latent, dim_obs, ConvEncoder, ConvDecoder)
-    model_decoder = ConvDecoder(dim_obs, dim_latent)
+    model_decoder = ConvDecoder(1, dim_latent)
     model_encoder_test = hlax.models.GaussEncoder(dim_latent)
 
     output = base_vae_hardem.main(
