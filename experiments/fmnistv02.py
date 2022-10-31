@@ -72,7 +72,6 @@ class ConvEncoder(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        import ipdb; ipdb.set_trace()
         z = nn.Conv(5, (3, 3), padding="SAME")(x)
         z = nn.elu(z)
         z = nn.max_pool(z, (2, 2), padding="SAME")
@@ -91,7 +90,7 @@ class ConvDecoder(nn.Module):
     @nn.compact
     def __call__(self, z):
         x = nn.Dense(28 ** 2)(z)
-        x = x.reshape(-1, *self.dim_obs)
+        x = x.reshape(*z.shape[:-1], *self.dim_obs)
         x = nn.elu(x)
         x = nn.Conv(5, (3, 3), padding="SAME")(x)
         x = nn.elu(x)
@@ -118,7 +117,7 @@ if __name__ == "__main__":
     import sys
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    path_config = "./experiments/configs/fmnistv01.toml"
+    path_config = "./experiments/configs/fmnistv02.toml"
     name_file = sys.argv[0]
     with open(path_config, "rb") as f:
         config = tomli.load(f)
@@ -132,14 +131,12 @@ if __name__ == "__main__":
     # X_warmup = jax.vmap(jax.image.resize, (0, None, None))(X_warmup, (32, 32), "nearest")
     # X_test = jax.vmap(jax.image.resize, (0, None, None))(X_test, (32, 32), "nearest")
     # # Reshaping to 32x32x1
-    # X_warmup = X_warmup[..., None]
-    # X_test = X_test[..., None]
+    X_warmup = X_warmup[..., None]
+    X_test = X_test[..., None]
 
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae_bern
     lossfn_hardem = hlax.losses.loss_hard_nmll
-
-    hidden_channels = (32, 64, 128, 256, 512)
 
     _, *dim_obs = X_warmup.shape
     dim_latent = config["setup"]["dim_latent"]
