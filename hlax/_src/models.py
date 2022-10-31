@@ -195,6 +195,8 @@ class VAEBern(nn.Module):
     Base class for a variational autoencoder
     with Bernoulli decoder p(x|z) = Bern(x| f(z))
     and Gaussian encoder q(z|x) = N(z|mu(x), sigma(x))
+
+    # TODO: set decoder and decoder to initialied models
     """
     latent_dim: int
     obs_dim: int

@@ -57,7 +57,7 @@ def iwae_bern(key, params, apply_fn, X_batch):
     dist_posterior = distrax.Normal(mean_z[:, None, :], std_z[:, None, :])
 
     log_prob_z_prior = dist_prior.log_prob(z)
-    log_prob_x = dist_decoder.log_prob(X_batch[:, None, :])
+    log_prob_x = dist_decoder.log_prob(X_batch).ravel()
     log_prob_z_post = dist_posterior.log_prob(z).sum(axis=-1)
 
     log_prob = log_prob_z_prior + log_prob_x - log_prob_z_post
@@ -65,6 +65,42 @@ def iwae_bern(key, params, apply_fn, X_batch):
     # negative Importance-weighted marginal log-likelihood
     niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).mean()
     return niwmll
+
+
+def hard_nmll_bern(params, z_batch, X_batch, model):
+    """
+    Loss function
+    -------------
+
+    Negative Marginal log-likelihood for hard EM
+    assuming an isotropic Gaussian prior with zero mean
+    and a decoder with a diagonal covariance matrix
+
+    Parameters
+    ----------
+    params: pytree
+        Parameters of the decoder model, i.e.,
+        model.apply(params, z_batch) = X_batch (approx)
+    z_batch: jnp.ndarray
+        Batch of latent variables
+    X_batch: jnp.ndarray
+        Batch of observations
+    model: flax.nn.Module
+        Decoder model (input z -> output x)
+    """
+    dim_latent = model.dim_latent
+
+    logit_mean_x = model.apply(params, z_batch)
+
+    dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(dim_latent), jnp.ones(dim_latent))
+    dist_decoder = distrax.Bernoulli(logits=logit_mean_x)
+
+    log_prob_z_prior = dist_prior.log_prob(z_batch)
+    log_prob_x = dist_decoder.log_prob(X_batch).ravel()
+
+    log_prob = log_prob_z_prior + log_prob_x
+
+    return -log_prob.mean()
 
 
 def loss_hard_nmll(params, z_batch, X_batch, model):
