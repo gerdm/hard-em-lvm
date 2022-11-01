@@ -28,7 +28,7 @@ class Decoder(nn.Module):
     @nn.compact
     def __call__(self, z):
         x = nn.Dense(20)(z)
-        x = nn.tanh(x)
+        x = nn.elu(x)
         mean_x = self.mean(x)
         logvar_x = self.logvar(x)
         return mean_x, logvar_x 
@@ -44,9 +44,9 @@ class Encoder(nn.Module):
     @nn.compact
     def __call__(self, x):
         z = nn.Dense(self.n_hidden)(x)
-        z = nn.tanh(z)
+        z = nn.elu(z)
         z = nn.Dense(self.n_hidden)(z)
-        z = nn.tanh(z)
+        z = nn.elu(z)
         mean_z = nn.Dense(self.latent_dim)(z)
         logvar_z = nn.Dense(self.latent_dim)(z)
         return mean_z, logvar_z

@@ -7,7 +7,7 @@ dim_latent = 50
     num_epochs = 1000
     batch_size = 200
     eval_epochs = [2, 10, 100, 250, 500, 1000]
-    learning_rate = 1e-3 # For VAE and HardEM
+    learning_rate = 1e-5 # For VAE and HardEM
 
     [warmup.vae]
         num_is_samples = 10
@@ -17,6 +17,6 @@ dim_latent = 50
 
 [test]
     num_obs = 1000
-    num_epochs = 100
+    num_epochs = 1000
     learning_rate = 1e-4
     num_is_samples = 10
