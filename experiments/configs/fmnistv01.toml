@@ -17,6 +17,6 @@ dim_latent = 50
 
 [test]
     num_obs = 1000
-    num_epochs = 1000
+    num_epochs = 200
     learning_rate = 1e-4
     num_is_samples = 10

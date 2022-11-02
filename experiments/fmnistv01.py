@@ -1,4 +1,3 @@
-import os
 import jax
 import hlax
 import sys
@@ -7,11 +6,6 @@ import pickle
 import base_vae_hardem
 import flax.linen as nn
 from datetime import datetime, timezone
-
-os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_VISIBLE_DEVICES"] = "1"
-
 
 class Decoder(nn.Module):
     """
@@ -53,11 +47,18 @@ class Encoder(nn.Module):
 
 
 if __name__ == "__main__":
+    import os
     import sys
+
+    os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
+    os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
+    os.environ["TPU_VISIBLE_DEVICES"] = "1"
+
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
+    name_file, *path_config = sys.argv
     path_config = "./experiments/configs/fmnistv01.toml"
-    name_file = sys.argv[0]
+
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
@@ -109,5 +110,5 @@ if __name__ == "__main__":
     }
 
     print(f"Saving {now}")
-    with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
+    with open(f"./experiments/outputs/experiment-{now}-mlp.pkl", "wb") as f:
         pickle.dump(output, f)
