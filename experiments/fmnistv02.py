@@ -5,70 +5,13 @@ import sys
 import tomli
 import pickle
 import base_vae_hardem
-import numpy as np
 import flax.linen as nn
 from datetime import datetime, timezone
-from typing import Sequence, Tuple, List
-
-os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-os.environ["TPU_VISIBLE_DEVICES"] = "0"
-
-class Decoder(nn.Module):
-    """
-    Based on:
-    https://github.com/probml/probml-utils/blob/main/probml_utils/conv_vae_flax_utils.py
-    """
-    dim_obs: Tuple[int, int, int] # (H)eight, (W)idth, number of (C)hannels
-    dim_latent: int = 20
-    hidden_channels: Sequence[int] = (32, 64, 128, 256, 512)
-
-    @nn.compact
-    def __call__(self, X, training=True):
-        H, W, C = self.dim_obs
-
-        # TODO: relax this restriction
-        factor = 2 ** len(self.hidden_channels)
-        assert(
-            H % factor == W % factor == 0
-        ), f"output_dim must be a multiple of {factor}"
-        H, W = H // factor, W // factor
-
-        X = nn.Dense(H * W * self.hidden_channels[-1])(X)
-        X = nn.elu(X)
-        X = X.reshape((-1, H, W, self.hidden_channels[-1]))
-
-        for hidden_channel in reversed(self.hidden_channels[:-1]):
-            X = nn.ConvTranspose(
-                hidden_channel, (3, 3), strides=(2, 2), padding=((1, 2), (1, 2))
-            )(X)
-            # X = nn.BatchNorm(use_running_average=not training)(X)
-            X = nn.elu(X)
-
-        X = nn.ConvTranspose(C, (3, 3), strides=(2, 2), padding=((1, 2), (1, 2)))(X)
-        return X
-
-
-class Encoder(nn.Module):
-    latent_dim: int
-    hidden_channels: Sequence[int] = (32, 64, 128, 256, 512)
-
-    @nn.compact
-    def __call__(self, X, training=True):
-        for channel in self.hidden_channels:
-            X = nn.Conv(channel, (3, 3), strides=2, padding=1)(X)
-            # X = nn.BatchNorm(use_running_average=not training)(X)
-            X = nn.elu(X)
-
-        X = X.reshape((-1, np.prod(X.shape[-3:])))
-        mu = nn.Dense(self.latent_dim)(X)
-        logvar = nn.Dense(self.latent_dim)(X)
-
-        return mu, logvar
+from typing import List
 
 
 class ConvEncoder(nn.Module):
-    latent_dim: Tuple
+    latent_dim: List
 
     @nn.compact
     def __call__(self, x):
@@ -115,6 +58,11 @@ class ConvVAE(nn.Module):
 
 if __name__ == "__main__":
     import sys
+
+    os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
+    os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
+    os.environ["TPU_VISIBLE_DEVICES"] = "0"
+
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
     path_config = "./experiments/configs/fmnistv02.toml"
@@ -127,10 +75,6 @@ if __name__ == "__main__":
     warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test, melt=False)
     X_warmup, X_test = warmup[0], test[0]
 
-    # # Resizing to 32x32
-    # X_warmup = jax.vmap(jax.image.resize, (0, None, None))(X_warmup, (32, 32), "nearest")
-    # X_test = jax.vmap(jax.image.resize, (0, None, None))(X_test, (32, 32), "nearest")
-    # # Reshaping to 32x32x1
     X_warmup = X_warmup[..., None]
     X_test = X_test[..., None]
 
@@ -170,5 +114,5 @@ if __name__ == "__main__":
     }
 
     print(f"Saving {now}")
-    with open(f"./experiments/outputs/experiment-{now}.pkl", "wb") as f:
+    with open(f"./experiments/outputs/experiment-{now}-conv.pkl", "wb") as f:
         pickle.dump(output, f)
