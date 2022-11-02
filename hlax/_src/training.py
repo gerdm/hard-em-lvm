@@ -1,7 +1,5 @@
 import jax
-import distrax
 import optax
-import jax.numpy as jnp
 from functools import partial
 from tqdm.auto import tqdm
 
@@ -42,23 +40,30 @@ def get_batch_train_ixs(key, num_samples, batch_size):
 
 @partial(jax.vmap, in_axes=(0, 0, 0, 0, None, None, None, None, None, None))
 def update_encoder_parameters(key, params_encoder, opt_state, obs, params_decoder, tx,
-                              encoder, decoder, grad_neg_iwmll, num_is_samples=10):
-    mll, grads = grad_neg_iwmll(key, params_encoder, params_decoder, obs,
-                                        encoder, decoder, num_is_samples)
+                              encoder, decoder, grad_loss, num_is_samples=10):
+    mll, grads = grad_loss(
+        key,
+        params_encoder,
+        params_decoder,
+        obs,
+        encoder,
+        decoder,
+        num_is_samples
+    )
     updates, opt_state = tx.update(grads, opt_state, params_encoder)
     params_encoder = optax.apply_updates(params_encoder, updates)
     
     return mll, params_encoder, opt_state
 
 
-@partial(jax.jit, static_argnames=("tx", "encoder", "decoder", "grad_neg_iwmll", "num_is_samples"))
+@partial(jax.jit, static_argnames=("tx", "encoder", "decoder", "grad_loss", "num_is_samples"))
 def run_epoch_encoder(key, params_encoder, states, observations, tx, params_decoder,
-                      encoder, decoder, grad_neg_iwmll, num_is_samples=10):
+                      encoder, decoder, grad_loss, num_is_samples=10):
     num_obs = len(observations)
     keys_eval = jax.random.split(key, num_obs)
     mll_vals, params_encoder, states = update_encoder_parameters(
         keys_eval, params_encoder, states, observations, params_decoder,
-        tx, encoder, decoder, grad_neg_iwmll, num_is_samples
+        tx, encoder, decoder, grad_loss, num_is_samples
     )
     
     return mll_vals, params_encoder, states
@@ -73,14 +78,14 @@ def init_params_state_encoder(key, encoder, tx):
 
 
 def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
-                  grad_neg_iwmll, num_is_samples=10, leave=True):
+                  grad_loss, num_is_samples=10, leave=True):
     """
     Train an unamortised variational distribution q(z|x) using the
     importance-weighted marginal log-likelihood.
 
     Parameters
     ----------
-    grad_neg_iwmll : function
+    grad_loss : function
         jax.value_and_grad of the negative importance-weighted marginal
         log-likelihood.
     """
@@ -103,7 +108,7 @@ def train_encoder(key, X, encoder, decoder, params_decoder, tx, n_epochs,
             params_decoder,
             encoder,
             decoder,
-            grad_neg_iwmll,
+            grad_loss,
             num_is_samples=num_is_samples
         )
         
