@@ -243,7 +243,7 @@ def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_har
 
 
 def test_single(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
-    key_train, key_eval= jax.random.split(key)
+    key_train, key_eval = jax.random.split(key)
     keys_eval = jax.random.split(key_eval, len(X))
 
     encoder_test = config_test.model_encoder

@@ -145,7 +145,7 @@ def neg_iwmll_bern(key, params_encoder, params_decoder, observation,
               encoder, decoder, num_is_samples=10):
     """
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
-    gaussian encoder.
+    gaussian encoder and Bernoulli-distributed decoder.
     """
     latent_samples, (mu_z, std_z) = encoder.apply(
         params_encoder, key, num_samples=num_is_samples
