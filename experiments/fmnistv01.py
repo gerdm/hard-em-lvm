@@ -67,13 +67,6 @@ if __name__ == "__main__":
     warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test)
     X_warmup, X_test = warmup[0], test[0]
 
-    dict_models = {
-        "class_decoder": Decoder,
-        "class_encoder": Encoder,   
-        "class_encoder_test": hlax.models.GaussEncoder,
-        "class_vae": hlax.models.VAEGauss,
-    }
-
     key = jax.random.PRNGKey(314)
     lossfn_vae = hlax.losses.iwae
     lossfn_hardem = hlax.losses.loss_hard_nmll
