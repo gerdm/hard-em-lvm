@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    path_config = "./experiments/configs/fmnistv02.toml"
+    path_config = "./experiments/configs/fmnist-conv01.toml"
     name_file = sys.argv[0]
     with open(path_config, "rb") as f:
         config = tomli.load(f)
