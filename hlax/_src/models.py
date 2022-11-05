@@ -167,6 +167,8 @@ class VAEGauss(nn.Module):
     """
     Base class for variational autoencoder with
     gaussian decoder p(x|z) and gaussian encoder p(z|x)
+
+    # TODO: set decoder and decoder to initialied models
     """
     latent_dim: int
     obs_dim: int
