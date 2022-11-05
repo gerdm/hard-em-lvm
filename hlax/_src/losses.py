@@ -141,17 +141,11 @@ def loss_hard_nmll(params, z_batch, X_batch, model):
     return -log_prob.mean()
 
 
-def neg_iwmll_bern(
-    params_encoder,
-    params_decoder,
-    key,
-    observation,
-    model_vae,
-    num_is_samples=10,
-):
+def neg_iwmll_bern(key, params_encoder, params_decoder, observation,
+              encoder, decoder, num_is_samples=10):
     """
     Importance-weighted marginal log-likelihood for an unamortised, uncoditional
-    gaussian encoder and Bernoulli-distributed decoder.
+    gaussian encoder.
     """
     latent_samples, (mu_z, std_z) = encoder.apply(
         params_encoder, key, num_samples=num_is_samples
