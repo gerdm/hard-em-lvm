@@ -1,5 +1,7 @@
 """
 Hard-EM Latent Variable Model training
+
+#TODO: Rename to hard_em_lvm.py
 """
 import jax
 import hlax
