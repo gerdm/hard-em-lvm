@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     os.environ["TPU_CHIPS_PER_HOST_BOUNDS"] = "1,1,1"
     os.environ["TPU_HOST_BOUNDS"] = "1,1,1"
-    os.environ["TPU_VISIBLE_DEVICES"] = "0"
+    os.environ["TPU_VISIBLE_DEVICES"] = "1"
 
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
@@ -72,7 +72,7 @@ if __name__ == "__main__":
 
     num_warmup = config["warmup"]["num_obs"]
     num_test = config["test"]["num_obs"]
-    warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test, melt=False)
+    warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test, melt=False, normalize=False)
     X_warmup, X_test = warmup[0], test[0]
 
     X_warmup = X_warmup[..., None]

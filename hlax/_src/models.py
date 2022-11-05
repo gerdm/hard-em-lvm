@@ -196,7 +196,7 @@ class VAEBern(nn.Module):
     with Bernoulli decoder p(x|z) = Bern(x| f(z))
     and Gaussian encoder q(z|x) = N(z|mu(x), sigma(x))
 
-    # TODO: set decoder and decoder to initialied models
+    # TODO: set decoder and encoder to initialied models
     """
     latent_dim: int
     obs_dim: int
@@ -211,6 +211,39 @@ class VAEBern(nn.Module):
 
     def setup(self):
         self.encoder = self.Encoder(self.latent_dim)
+        self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
+
+    def __call__(self, x, key_eps, num_samples=1):
+        mean_z, logvar_z = self.encoder(x)
+        z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
+        logit_mean_x = self.decoder(z)
+        return z, (mean_z, logvar_z), logit_mean_x
+
+
+class UnamortisedVAEBern(nn.Module):
+    """
+    Base class for an unamortised variational autoencoder
+    with Bernoulli decoder p(x|z) = Bern(x| f(z))
+    and Gaussian encoder q(z|x) = N(z|mu(x), sigma(x))
+    """
+    latent_dim: int
+    obs_dim: int
+    Encoder: nn.Module
+    Decoder: nn.Module
+
+    def reparameterise(self, key, mean, logvar, num_samples=1):
+        std = jnp.exp(logvar / 2)
+        eps = jax.random.normal(key, (num_samples, *logvar.shape))
+        z = mean[None, ...] + jnp.einsum("...d,...d->...d", std, eps)
+        return z
+
+    def setup(self):
+        self.encoder = nn.vmap(
+            self.Encoder,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            in_axes=0,
+        )(self.latent_dim)
         self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
 
     def __call__(self, x, key_eps, num_samples=1):
