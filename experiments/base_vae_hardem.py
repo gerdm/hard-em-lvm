@@ -139,11 +139,10 @@ def warmup_vae(
     keys_train = jax.random.split(key_train, config.num_epochs)
     batch_init = jnp.ones((config.batch_size, *dim_obs))
 
-    model = config.model_vae
-    params_init = model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+    params_init = config.model_vae.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
     state = TrainState.create(
-        apply_fn=partial(model.apply, num_samples=config.num_is_samples),
+        apply_fn=partial(config.model_vae.apply, num_samples=config.num_is_samples),
         params=params_init,
         tx=config.tx_vae,
         )
