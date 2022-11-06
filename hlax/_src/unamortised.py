@@ -75,7 +75,7 @@ def create_state_batch(state, ixs):
     """
     Create a batch of the unamortised TrainStep
     """
-    params_batch_encoder = jax.tree_map(lambda x: x[ixs], state.params["params"]["decoder"])
+    params_batch_encoder = jax.tree_map(lambda x: x[ixs], state.params["params"]["encoder"])
     params_batch = freeze({
         "params": {
             "encoder": params_batch_encoder,
@@ -162,3 +162,29 @@ def update_reconstruct_state(state, new_params, new_opt_state):
         opt_state=new_opt_state,
     )
     return new_state
+
+
+@partial(jax.jit, static_argnames=("lossfn",))
+def train_step_ix(key, X, state, ixs, lossfn):
+    X_batch = X[ixs]
+    state_batch = create_state_batch(state, ixs)
+    loss, new_state_batch = update_state_batch(key, X_batch, state_batch, lossfn)
+    new_params = reconstruct_params(state, new_state_batch, ixs)
+    new_opt_state = reconstruct_opt_state(state, new_state_batch, ixs)
+    new_state = update_reconstruct_state(state, new_params, new_opt_state)
+    return loss, new_state
+
+
+def train_epoch(key, X, state, batch_size, lossfn):
+    num_obs = X.shape[0]
+    key_batch, key_train = jax.random.split(key)
+    batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_obs, batch_size)
+    num_batches = len(batch_ixs)
+    keys_train = jax.random.split(key_train, num_batches)
+
+    losses = 0
+    for batch_ix, key_epoch in zip(batch_ixs, keys_train):
+        loss, state = train_step_ix(key_epoch, X, state, batch_ix, lossfn)
+        losses += loss
+
+    return losses / num_batches, state
