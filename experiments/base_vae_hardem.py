@@ -183,7 +183,7 @@ def warmup_hardem(
     key_init, key_step = jax.random.split(key)
     keys_step = jax.random.split(key_step, config.num_epochs)
 
-    states = hlax.hard_decoder.initialise_state(
+    states = hlax.hard_em_lvm.initialise_state(
         key_init,
         decoder,
         config.tx_params,
@@ -196,7 +196,7 @@ def warmup_hardem(
 
     pbar = tqdm(enumerate(keys_step), total=config.num_epochs)
     for e, keyt in pbar:
-        res = hlax.hard_decoder.train_epoch_adam(
+        res = hlax.hard_em_lvm.train_epoch_adam(
             keyt,
             params_decoder,
             z_est,
