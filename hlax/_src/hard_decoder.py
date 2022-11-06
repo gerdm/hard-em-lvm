@@ -305,7 +305,7 @@ def train_checkpoints(
     key_init, key_step = jax.random.split(key)
     keys_step = jax.random.split(key_step, config.num_epochs)
 
-    states = hlax.hard_decoder.initialise_state(
+    states = initialise_state(
         key_init,
         decoder,
         config.tx_params,
@@ -319,7 +319,7 @@ def train_checkpoints(
     time_init = time()
     pbar = tqdm(enumerate(keys_step), total=config.num_epochs)
     for e, keyt in pbar:
-        res = hlax.hard_decoder.train_epoch_adam(
+        res = train_epoch_adam(
             keyt,
             params_decoder,
             z_est,
