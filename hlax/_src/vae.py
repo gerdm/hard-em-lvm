@@ -1,7 +1,28 @@
 import jax
 import hlax
+import chex
+import optax
+import flax.linen as nn
 import jax.numpy as jnp
+from tqdm.auto import tqdm
+from typing import Callable
 from functools import partial
+from flax.core import freeze, unfreeze
+from dataclasses import dataclass
+from flax.training.train_state import TrainState
+
+
+@dataclass
+class CheckpointsConfig:
+    model_vae: nn.Module
+
+    num_epochs: int
+    batch_size: int
+    dim_latent: int
+    eval_epochs: list
+
+    tx_vae: optax.GradientTransformation
+    num_is_samples: int
 
 
 @partial(jax.jit, static_argnames="lossfn")
@@ -29,3 +50,47 @@ def train_epoch(key, state, X, batch_size, lossfn):
         total_loss += loss
     
     return total_loss.item(), state
+
+
+def train_checkpoints(
+    key: chex.ArrayDevice,
+    config: CheckpointsConfig,
+    X: chex.ArrayDevice,
+    lossfn: Callable,
+):
+    """
+    Find inference model parameters theta at multiple epochs.
+    """
+    dict_params = {}
+    hist_loss = []
+    _, *dim_obs = X.shape
+
+    key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
+    keys_train = jax.random.split(key_train, config.num_epochs)
+    batch_init = jnp.ones((config.batch_size, *dim_obs))
+
+    params_init = config.model_vae.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+
+    state = TrainState.create(
+        apply_fn=partial(config.model_vae.apply, num_samples=config.num_is_samples),
+        params=params_init,
+        tx=config.tx_vae,
+        )
+
+    for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
+        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, lossfn)
+
+        hist_loss.append(loss)
+        pbar.set_description(f"vae-{loss=:.3e}")
+
+        if (enum := e + 1) in config.eval_epochs:
+            params_vae = state.params
+            params_decoder_vae = freeze({"params": unfreeze(params_vae)["params"]["decoder"]})
+
+            dict_params[f"e{enum}"] = params_decoder_vae
+
+    output = {
+        "checkpoint_params": dict_params,
+        "hist_loss": jnp.array(hist_loss),
+    }
+    return output

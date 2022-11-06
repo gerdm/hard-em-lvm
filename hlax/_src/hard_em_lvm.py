@@ -14,16 +14,19 @@ from typing import Callable
 from dataclasses import dataclass
 
 @dataclass
-class Config:
-    model_vae: nn.Module
+class CheckpointsConfig:
+    model_decoder: nn.Module
 
     num_epochs: int
     batch_size: int
     dim_latent: int
     eval_epochs: list
 
-    tx_vae: optax.GradientTransformation
-    num_is_samples: int
+    num_its_params: int
+    num_its_latent: int
+
+    tx_params: optax.GradientTransformation
+    tx_latent: optax.GradientTransformation
 
 
 def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
@@ -287,7 +290,7 @@ def train_epoch(key, params, z_est, opt_states, observations,
 
 def train_checkpoints(
     key: chex.ArrayDevice,
-    config: Config,
+    config: CheckpointsConfig,
     X: chex.ArrayDevice,
     lossfn: Callable,
 ):

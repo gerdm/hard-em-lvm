@@ -35,35 +35,6 @@ from flax.training.train_state import TrainState
 
 
 @dataclass
-class WarmupConfigVAE:
-    model_vae: nn.Module
-
-    num_epochs: int
-    batch_size: int
-    dim_latent: int
-    eval_epochs: list
-
-    tx_vae: optax.GradientTransformation
-    num_is_samples: int
-
-
-@dataclass
-class WarmupConfigHardEM:
-    model_decoder: nn.Module
-
-    num_epochs: int
-    batch_size: int
-    dim_latent: int
-    eval_epochs: list
-
-    num_its_params: int
-    num_its_latent: int
-
-    tx_params: optax.GradientTransformation
-    tx_latent: optax.GradientTransformation
-
-
-@dataclass
 class TestConfig:
     num_epochs: int
     num_is_samples: int
@@ -88,7 +59,7 @@ def setup(config, model_vae, model_decoder, model_encoder_test):
     tx_latent = optax.adam(learning_rate)
     tx_test = optax.adam(learning_rate_test)
 
-    config_vae = WarmupConfigVAE(
+    config_vae = hlax.vae.CheckpointsConfig(
         num_epochs=config["warmup"]["num_epochs"],
         batch_size=config["warmup"]["batch_size"],
         dim_latent=config["setup"]["dim_latent"],
@@ -98,7 +69,7 @@ def setup(config, model_vae, model_decoder, model_encoder_test):
         model_vae=model_vae,
     )
 
-    config_hardem = WarmupConfigHardEM(
+    config_hardem = hlax.hard_em_lvm.CheckpointsConfig(
         num_epochs=config["warmup"]["num_epochs"],
         batch_size=config["warmup"]["batch_size"],
         dim_latent=config["setup"]["dim_latent"],
@@ -122,112 +93,12 @@ def setup(config, model_vae, model_decoder, model_encoder_test):
     return config_vae, config_hardem, config_test
 
 
-def warmup_vae(
-    key: chex.ArrayDevice,
-    config: WarmupConfigVAE,
-    X: chex.ArrayDevice,
-    lossfn: Callable,
-):
-    """
-    Find inference model parameters theta
-    """
-    dict_params = {}
-    hist_loss = []
-    _, *dim_obs = X.shape
-
-    key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
-    keys_train = jax.random.split(key_train, config.num_epochs)
-    batch_init = jnp.ones((config.batch_size, *dim_obs))
-
-    params_init = config.model_vae.init(key_params_init, batch_init, key_eps_init, num_samples=3)
-
-    state = TrainState.create(
-        apply_fn=partial(config.model_vae.apply, num_samples=config.num_is_samples),
-        params=params_init,
-        tx=config.tx_vae,
-        )
-
-    for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
-        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, lossfn)
-
-        hist_loss.append(loss)
-        pbar.set_description(f"vae-{loss=:.3e}")
-
-        if (enum := e + 1) in config.eval_epochs:
-            params_vae = state.params
-            params_decoder_vae = freeze({"params": unfreeze(params_vae)["params"]["decoder"]})
-
-            dict_params[f"e{enum}"] = params_decoder_vae
-
-    output = {
-        "checkpoint_params": dict_params,
-        "hist_loss": jnp.array(hist_loss),
-    }
-    return output
-
-
-def warmup_hardem(
-    key: chex.ArrayDevice,
-    config: WarmupConfigHardEM,
-    X: chex.ArrayDevice,
-    lossfn: Callable,
-):
-    """
-    Find inference model parameters theta
-    using the Hard EM algorithm
-    """
-    dict_params = {}
-    hist_loss = []
-    decoder = config.model_decoder
-
-    key_init, key_step = jax.random.split(key)
-    keys_step = jax.random.split(key_step, config.num_epochs)
-
-    states = hlax.hard_em_lvm.initialise_state(
-        key_init,
-        decoder,
-        config.tx_params,
-        config.tx_latent,
-        X,
-        config.dim_latent,
-    )
-    opt_states, target_states = states
-    params_decoder, z_est = target_states
-
-    pbar = tqdm(enumerate(keys_step), total=config.num_epochs)
-    for e, keyt in pbar:
-        res = hlax.hard_em_lvm.train_epoch_adam(
-            keyt,
-            params_decoder,
-            z_est,
-            opt_states,
-            X,
-            config.batch_size,
-            decoder,
-            config.tx_params, config.tx_latent,
-            config.num_its_params, config.num_its_latent,
-            lossfn
-        )
-        loss, params_decoder, z_est, opt_states = res
-        hist_loss.append(loss)
-        pbar.set_description(f"hEM-{loss=:.3e}")
-
-        if (enum := e + 1) in config.eval_epochs:
-            dict_params[f"e{enum}"] = params_decoder
-
-    output = {
-        "checkpoint_params": dict_params,
-        "hist_loss": jnp.array(hist_loss),
-    }
-    return output
-
-
 def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem):
     key_vae, key_hardem = jax.random.split(key)
 
     # Obtain inference model parameters
-    output_hardem = warmup_hardem(key_hardem, config_hardem, X_train, lossfn_hardem)
-    output_vae = warmup_vae(key_vae, config_vae, X_train, lossfn_vae)
+    output_hardem = hlax.hard_em_lvm.train_checkpoints(key_hardem, config_hardem, X_train, lossfn_hardem)
+    output_vae = hlax.vae.train_checkpoints(key_vae, config_vae, X_train, lossfn_vae)
 
     output =  {
         "vae": {
@@ -241,7 +112,7 @@ def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_har
     return output
 
 
-def test_single(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
+def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
     key_train, key_eval = jax.random.split(key)
     keys_eval = jax.random.split(key_eval, len(X))
 
@@ -266,8 +137,8 @@ def test_phase(key, X_test, config_test, output_warmup, grad_loss_encoder, vmap_
     output_hardem = output_warmup["hardem"]
 
     dict_mll_epochs = {}
-    dict_mll_epochs_vae = test_single(key, config_test, output_vae, X_test, grad_loss_encoder, vmap_loss_encoder)
-    dict_mll_epochs_hardem = test_single(key, config_test, output_hardem, X_test, grad_loss_encoder, vmap_loss_encoder)
+    dict_mll_epochs_vae = test_decoder_params(key, config_test, output_vae, X_test, grad_loss_encoder, vmap_loss_encoder)
+    dict_mll_epochs_hardem = test_decoder_params(key, config_test, output_hardem, X_test, grad_loss_encoder, vmap_loss_encoder)
 
     for keyv in dict_mll_epochs_vae.keys():
         mll_vals_vae = dict_mll_epochs_vae[keyv]
