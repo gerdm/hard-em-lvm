@@ -1,10 +1,12 @@
 import os
 import jax
-import hlax
 import sys
+import distrax
+import hlax
 import tomli
 import pickle
 import base_vae_hardem
+import jax.numpy as jnp
 import flax.linen as nn
 from datetime import datetime, timezone
 from typing import List
@@ -41,19 +43,100 @@ class ConvDecoder(nn.Module):
         return x
 
 
-class ConvVAE(nn.Module):
-    observed_dims: tuple
-    latent_dim: int
+def neg_iwmll_bern(key, params_encoder, params_decoder, observation,
+              encoder, decoder, num_is_samples=10):
+    """
+    Importance-weighted marginal log-likelihood for an unamortised, uncoditional
+    gaussian encoder.
+    """
+    latent_samples, (mu_z, std_z) = encoder.apply(
+        params_encoder, key, num_samples=num_is_samples
+    )
 
-    def setup(self):
-        self.encoder = ConvEncoder(self.latent_dim)
-        self.decoder = ConvDecoder(self.observed_dims)
+    _, dim_latent = latent_samples.shape
+    # log p(x|z)
+    logit_mean_x = decoder.apply(params_decoder, latent_samples)
+    log_px_cond = distrax.Bernoulli(logits=logit_mean_x).log_prob(observation).sum(axis=(-1, -2, -3))
 
-    def encode(self, x):
-        return self.encoder(x)
+    # log p(z)
+    mu_z_init, std_z_init = jnp.zeros(dim_latent), jnp.ones(dim_latent)
+    log_pz = distrax.MultivariateNormalDiag(mu_z_init, std_z_init).log_prob(latent_samples)
 
-    def __call__(self, x):
-        return self.decoder(self.encoder(x))
+    # log q(z)
+    log_qz = distrax.MultivariateNormalDiag(mu_z, std_z).log_prob(latent_samples)
+
+    # Importance-weighted marginal log-likelihood
+    log_prob = log_pz + log_px_cond - log_qz
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples)
+    return niwmll
+
+
+def iwae_bern(key, params, apply_fn, X_batch):
+    """
+    Importance-weighted marginal log-likelihood for
+    a Bernoulli decoder
+    """
+    batch_size = len(X_batch)
+
+    # keys = jax.random.split(key, batch_size)
+    # encode_decode = jax.vmap(apply_fn, (None, 0, 0))
+    # encode_decode = encode_decode(params, X_batch, keys)
+    encode_decode = apply_fn(params, X_batch, key)
+    z, (mean_z, logvar_z), logit_mean_x = encode_decode
+    _, num_is_samples, dim_latent = z.shape
+
+    std_z = jnp.exp(logvar_z / 2)
+
+    dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(dim_latent),
+                                                jnp.ones(dim_latent))
+    dist_decoder = distrax.Bernoulli(logits=logit_mean_x)
+    dist_posterior = distrax.Normal(mean_z[None, ...], std_z[None, ...])
+
+    log_prob_z_prior = dist_prior.log_prob(z)
+    log_prob_x = dist_decoder.log_prob(X_batch).sum(axis=(-1, -2, -3))
+    log_prob_z_post = dist_posterior.log_prob(z).sum(axis=-1)
+
+    log_prob = log_prob_z_prior + log_prob_x - log_prob_z_post
+
+    # negative Importance-weighted marginal log-likelihood
+    niwmll = -jax.nn.logsumexp(log_prob, axis=-1, b=1/num_is_samples).mean()
+    return niwmll
+
+
+def hard_nmll_bern(params, z_batch, X_batch, model):
+    """
+    Loss function
+    -------------
+
+    Negative Marginal log-likelihood for hard EM
+    assuming an isotropic Gaussian prior with zero mean
+    and a decoder with a diagonal covariance matrix
+
+    Parameters
+    ----------
+    params: pytree
+        Parameters of the decoder model, i.e.,
+        model.apply(params, z_batch) = X_batch (approx)
+    z_batch: jnp.ndarray
+        Batch of latent variables
+    X_batch: jnp.ndarray
+        Batch of observations
+    model: flax.nn.Module
+        Decoder model (input z -> output x)
+    """
+    dim_latent = model.dim_latent
+
+    logit_mean_x = model.apply(params, z_batch)
+
+    dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(dim_latent), jnp.ones(dim_latent))
+    dist_decoder = distrax.Bernoulli(logits=logit_mean_x)
+
+    log_prob_z_prior = dist_prior.log_prob(z_batch)
+    log_prob_x = dist_decoder.log_prob(X_batch).sum(axis=(-1, -2, -3))
+
+    log_prob = log_prob_z_prior + log_prob_x
+
+    return -log_prob.mean()
 
 
 if __name__ == "__main__":
@@ -65,8 +148,12 @@ if __name__ == "__main__":
 
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-    path_config = "./experiments/configs/fmnist-conv01.toml"
-    name_file = sys.argv[0]
+    name_file, *path_config = sys.argv
+    if len(path_config) > 0:
+        path_config = path_config[0]
+    else:
+        path_config = "./experiments/configs/fmnist-conv01.toml"
+
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
@@ -79,11 +166,11 @@ if __name__ == "__main__":
     X_test = X_test[..., None]
 
     key = jax.random.PRNGKey(314)
-    lossfn_vae = hlax.losses.iwae_bern
-    lossfn_hardem = hlax.losses.hard_nmll_bern
+    lossfn_vae = iwae_bern
+    lossfn_hardem = hard_nmll_bern
 
-    grad_neg_iwmll_encoder = jax.value_and_grad(hlax.losses.neg_iwmll_bern, argnums=1)
-    vmap_neg_iwmll = jax.vmap(hlax.losses.neg_iwmll_bern, (0, 0, None, 0, None, None, None))
+    grad_neg_iwmll_encoder = jax.value_and_grad(neg_iwmll_bern, argnums=1)
+    vmap_neg_iwmll = jax.vmap(neg_iwmll_bern, (0, 0, None, 0, None, None, None))
 
     _, *dim_obs = X_warmup.shape
     dim_latent = config["setup"]["dim_latent"]
@@ -110,7 +197,7 @@ if __name__ == "__main__":
         "config": config,
         "timestamp": now,
         "name_file": name_file,
-        "path_config": path_config,
+        "config": config,
     }
 
     print(f"Saving {now}")

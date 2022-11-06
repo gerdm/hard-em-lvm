@@ -57,7 +57,10 @@ if __name__ == "__main__":
     now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
     name_file, *path_config = sys.argv
-    path_config = "./experiments/configs/fmnistv01.toml"
+    if len(path_config) > 0:
+        path_config = path_config[0]
+    else:
+        path_config = "./experiments/configs/fmnistv01.toml"
 
     with open(path_config, "rb") as f:
         config = tomli.load(f)
@@ -99,7 +102,7 @@ if __name__ == "__main__":
         "config": config,
         "timestamp": now,
         "name_file": name_file,
-        "path_config": path_config,
+        "config": config,
     }
 
     print(f"Saving {now}")
