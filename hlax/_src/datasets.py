@@ -1,7 +1,7 @@
 import jax.numpy as jnp
 from torchvision.datasets import FashionMNIST
 
-def load_fashion_mnist(n_train, n_test, melt=True, root=None, normalize=True):
+def load_fashion_mnist(n_train, n_test, melt=True, normalize=True, root=None):
     root = "/tmp/fashion-mnist" if root is None else root
     mnist_train = FashionMNIST(root, download=True, train=True)
     mnist_test = FashionMNIST(root, download=True, train=False)
