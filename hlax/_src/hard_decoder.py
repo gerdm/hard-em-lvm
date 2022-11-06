@@ -5,10 +5,27 @@ Hard-EM Latent Variable Model training
 """
 import jax
 import hlax
+import chex
 import optax
+import flax.linen as nn
 import jax.numpy as jnp
+from time import time
 from tqdm.auto import tqdm
 from functools import partial
+from typing import Callable
+from dataclasses import dataclass
+
+@dataclass
+class Config:
+    model_vae: nn.Module
+
+    num_epochs: int
+    batch_size: int
+    dim_latent: int
+    eval_epochs: list
+
+    tx_vae: optax.GradientTransformation
+    num_is_samples: int
 
 
 def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):
@@ -268,3 +285,64 @@ def train_epoch(key, params, z_est, opt_states, observations,
 
         total_nll += nll
     return total_nll, params, z_est, opt_states
+
+
+def train_checkpoints(
+    key: chex.ArrayDevice,
+    config: Config,
+    X: chex.ArrayDevice,
+    lossfn: Callable,
+):
+    """
+    Find inference model parameters theta
+    using the Hard EM algorithm
+    """
+    dict_params = {}
+    dict_times = {}
+    hist_loss = []
+    decoder = config.model_decoder
+
+    key_init, key_step = jax.random.split(key)
+    keys_step = jax.random.split(key_step, config.num_epochs)
+
+    states = hlax.hard_decoder.initialise_state(
+        key_init,
+        decoder,
+        config.tx_params,
+        config.tx_latent,
+        X,
+        config.dim_latent,
+    )
+    opt_states, target_states = states
+    params_decoder, z_est = target_states
+
+    time_init = time()
+    pbar = tqdm(enumerate(keys_step), total=config.num_epochs)
+    for e, keyt in pbar:
+        res = hlax.hard_decoder.train_epoch_adam(
+            keyt,
+            params_decoder,
+            z_est,
+            opt_states,
+            X,
+            config.batch_size,
+            decoder,
+            config.tx_params, config.tx_latent,
+            config.num_its_params, config.num_its_latent,
+            lossfn
+        )
+        loss, params_decoder, z_est, opt_states = res
+        hist_loss.append(loss)
+        pbar.set_description(f"hEM-{loss=:.3e}")
+
+        if (enum := e + 1) in config.eval_epochs:
+            time_ellapsed = time() - time_init
+            dict_times[f"e{enum}"] = time_ellapsed
+            dict_params[f"e{enum}"] = params_decoder
+
+    output = {
+        "times": dict_times,
+        "checkpoint_params": dict_params,
+        "hist_loss": jnp.array(hist_loss),
+    }
+    return output
