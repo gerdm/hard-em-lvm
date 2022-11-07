@@ -25,7 +25,7 @@ import optax
 import chex
 import numpy as np
 import flax.linen as nn
-from typing import Callable, Dict
+from typing import Callable, Dict, Union
 from dataclasses import dataclass
 from tqdm.auto import tqdm
 
@@ -39,11 +39,6 @@ class TestConfig:
     model_encoder: nn.Module # Unamortised
     model_decoder: nn.Module
 
-
-def load_dataset(n_train, n_test):
-    train, test = hlax.datasets.load_fashion_mnist(n_train, n_test)
-    X_train, X_test = train[0], test[0]
-    return X_train, X_test
 
 def load_test_config(
     config: Dict,
@@ -75,25 +70,6 @@ def setup(config, model_vae, model_decoder, model_encoder_test):
     return config_vae, config_hardem, config_test
 
 
-def warmup_phase(key, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem):
-    key_vae, key_hardem = jax.random.split(key)
-
-    # Obtain inference model parameters
-    output_hardem = hlax.hard_em_lvm.train_checkpoints(key_hardem, config_hardem, X_train, lossfn_hardem)
-    output_vae = hlax.vae.train_checkpoints(key_vae, config_vae, X_train, lossfn_vae)
-
-    output =  {
-        "vae": {
-            **output_vae,
-        },
-        "hardem": {
-            **output_hardem,
-        },
-    }
-
-    return output
-
-
 def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
     key_train, key_eval = jax.random.split(key)
     keys_eval = jax.random.split(key_eval, len(X))
@@ -114,21 +90,27 @@ def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_los
     return dict_mll_epochs
 
 
-def test_phase(key, X_test, config_test, output_warmup, grad_loss_encoder, vmap_loss_encoder):
-    output_vae = output_warmup["vae"]
-    output_hardem = output_warmup["hardem"]
-
-    dict_mll_epochs = {}
-    dict_mll_epochs_vae = test_decoder_params(key, config_test, output_vae, X_test, grad_loss_encoder, vmap_loss_encoder)
-    dict_mll_epochs_hardem = test_decoder_params(key, config_test, output_hardem, X_test, grad_loss_encoder, vmap_loss_encoder)
-
-    for keyv in dict_mll_epochs_vae.keys():
-        mll_vals_vae = dict_mll_epochs_vae[keyv]
-        mll_vals_hardem = dict_mll_epochs_hardem[keyv]
-        mll_vals = np.c_[mll_vals_hardem, mll_vals_vae]
-        dict_mll_epochs[keyv] = mll_vals
-
-    return dict_mll_epochs
+def train_test(
+    key: chex.ArrayDevice,
+    X_train: chex.ArrayDevice,
+    X_test: chex.ArrayDevice,
+    config_train: Union[hlax.hard_em_lvm.CheckpointsConfig,
+                        hlax.vae.CheckpointsConfig],
+    config_test: TestConfig,
+    lossfn_train: Callable,
+    vmap_loss_encoder_test: Callable,
+    grad_loss_encoder_test: Callable,
+    train_checkpoints: Callable
+) -> Dict:
+    key_train, key_test = jax.random.split(key)
+    output_train = train_checkpoints(key_train, config_train, X_train, lossfn_train)
+    output_test = test_decoder_params(key_test, config_test, output_train, X_test, grad_loss_encoder_test, vmap_loss_encoder_test)
+    
+    res = {
+        "train": output_train,
+        "test": output_test,
+    }
+    return res
 
 
 def main(
@@ -144,17 +126,19 @@ def main(
     grad_loss_encoder: Callable,
     vmap_loss_encoder: Callable,
 ):
-    key_warmup, key_eval = jax.random.split(key)
+    key_hardem, key_vae = jax.random.split(key)
     config_vae, config_hardem, config_test = setup(config, model_vae, model_decoder, model_encoder_test)
 
-    print("Warmup phase")
-    warmup_output = warmup_phase(key_warmup, X_train, config_vae, config_hardem, lossfn_vae, lossfn_hardem)
-    print("Test phase")
-    test_output = test_phase(key_eval, X_test, config_test, warmup_output, grad_loss_encoder, vmap_loss_encoder)
+    print("Hard EM")
+    res_hemlvm = train_test(key_hardem, X_train, X_test, config_hardem, config_test,
+                            lossfn_hardem, vmap_loss_encoder, grad_loss_encoder, hlax.hard_em_lvm.train_checkpoints)
+    print("VAE")
+    res_vae = train_test(key_vae, X_train, X_test, config_vae, config_test,
+                         lossfn_vae, vmap_loss_encoder, grad_loss_encoder, hlax.vae.train_checkpoints)
 
     output = {
-        "warmup": warmup_output,
-        "test": test_output,
+        "hardem": res_hemlvm,
+        "vae": res_vae,
     }
 
     return output
