@@ -4,6 +4,7 @@ import chex
 import optax
 import flax.linen as nn
 import jax.numpy as jnp
+from time import time
 from tqdm.auto import tqdm
 from typing import Callable, Dict
 from functools import partial
@@ -47,6 +48,7 @@ def load_config(
     )
     return config
 
+
 @partial(jax.jit, static_argnames="lossfn")
 def train_step(state, X, key, lossfn):
     params = state.params
@@ -84,6 +86,7 @@ def train_checkpoints(
     Find inference model parameters theta at multiple epochs.
     """
     dict_params = {}
+    dict_times = {}
     hist_loss = []
     _, *dim_obs = X.shape
 
@@ -99,19 +102,23 @@ def train_checkpoints(
         tx=config.tx_vae,
         )
 
+    time_init = time()
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=len(keys_train))):
-        loss, state = hlax.vae.train_epoch(keyt, state, X, config.batch_size, lossfn)
+        loss, state = train_epoch(keyt, state, X, config.batch_size, lossfn)
 
         hist_loss.append(loss)
         pbar.set_description(f"vae-{loss=:.3e}")
 
         if (enum := e + 1) in config.eval_epochs:
+            time_ellapsed = time() - time_init
             params_vae = state.params
             params_decoder_vae = freeze({"params": unfreeze(params_vae)["params"]["decoder"]})
 
+            dict_times[f"e{enum}"] = time_ellapsed
             dict_params[f"e{enum}"] = params_decoder_vae
 
     output = {
+        "times": dict_times,
         "checkpoint_params": dict_params,
         "hist_loss": jnp.array(hist_loss),
     }
