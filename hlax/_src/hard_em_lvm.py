@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from time import time
 from tqdm.auto import tqdm
 from functools import partial
-from typing import Callable
+from typing import Callable, Dict
 from dataclasses import dataclass
 
 @dataclass
@@ -27,6 +27,32 @@ class CheckpointsConfig:
 
     tx_params: optax.GradientTransformation
     tx_latent: optax.GradientTransformation
+
+
+def load_config(
+    dict_config: Dict,
+    model: nn.Module,
+) -> CheckpointsConfig:
+    """
+    Load a CheckpointsConfig object from a dictionary
+    """
+    learning_rate = dict_config["train"]["learning_rate"]
+
+    tx_params = optax.adam(learning_rate)
+    tx_latent = optax.adam(learning_rate)
+
+    config = hlax.hard_em_lvm.CheckpointsConfig(
+        num_epochs=dict_config["train"]["num_epochs"],
+        batch_size=dict_config["train"]["batch_size"],
+        dim_latent=dict_config["setup"]["dim_latent"],
+        eval_epochs=dict_config["train"]["eval_epochs"],
+        num_its_params=dict_config["train"]["hard_em"]["num_its_params"],
+        num_its_latent=dict_config["train"]["hard_em"]["num_its_latent"],
+        tx_params=tx_params,
+        tx_latent=tx_latent,
+        model_decoder=model,
+    )
+    return config
 
 
 def initialise_state(key, model, tx_params, tx_latent, X, dim_latent):

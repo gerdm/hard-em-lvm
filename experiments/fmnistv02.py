@@ -157,7 +157,7 @@ if __name__ == "__main__":
     with open(path_config, "rb") as f:
         config = tomli.load(f)
 
-    num_warmup = config["warmup"]["num_obs"]
+    num_warmup = config["train"]["num_obs"]
     num_test = config["test"]["num_obs"]
     warmup, test = hlax.datasets.load_fashion_mnist(num_warmup, num_test, melt=False, normalize=False)
     X_warmup, X_test = warmup[0], test[0]

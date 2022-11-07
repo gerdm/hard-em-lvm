@@ -2,18 +2,18 @@
 [setup]
 dim_latent = 50
 
-[warmup]
-    num_obs = 10000
-    num_epochs = 3000
+[train]
+    num_obs = 1_000
+    num_epochs = 1000
     batch_size = 200
-    eval_epochs = [2, 10, 100, 250, 500, 1000, 1250, 1500, 2000, 2250, 2500, 3000]
+    eval_epochs = [2, 10, 100, 250, 500, 1000]
     learning_rate = 1e-5 # For VAE and HardEM
 
-    [warmup.vae]
+    [train.vae]
         num_is_samples = 10
-    [warmup.hard_em]
-        num_its_latent = 15 # E-step
-        num_its_params = 10 # M-step
+    [train.hard_em]
+        num_its_latent = 10 # E-step
+        num_its_params = 5 # M-step
 
 [test]
     num_obs = 1000

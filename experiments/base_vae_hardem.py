@@ -24,14 +24,10 @@ import hlax
 import optax
 import chex
 import numpy as np
-import jax.numpy as jnp
 import flax.linen as nn
-from typing import Callable
-from functools import partial
+from typing import Callable, Dict
 from dataclasses import dataclass
-from flax.core import freeze, unfreeze
 from tqdm.auto import tqdm
-from flax.training.train_state import TrainState
 
 
 @dataclass
@@ -49,46 +45,32 @@ def load_dataset(n_train, n_test):
     X_train, X_test = train[0], test[0]
     return X_train, X_test
 
+def load_test_config(
+    config: Dict,
+    model_encoder: nn.Module,
+    model_decoder: nn.Module,
+) -> TestConfig:
+    """
+    Load the test configuration.
+    """
+    learning_rate = config["test"]["learning_rate"]
+    tx_test = optax.adam(learning_rate)
 
-def setup(config, model_vae, model_decoder, model_encoder_test):
-    learning_rate = config["warmup"]["learning_rate"]
-    learning_rate_test = config["warmup"]["learning_rate"]
-
-    tx_vae = optax.adam(learning_rate)
-    tx_params = optax.adam(learning_rate)
-    tx_latent = optax.adam(learning_rate)
-    tx_test = optax.adam(learning_rate_test)
-
-    config_vae = hlax.vae.CheckpointsConfig(
-        num_epochs=config["warmup"]["num_epochs"],
-        batch_size=config["warmup"]["batch_size"],
-        dim_latent=config["setup"]["dim_latent"],
-        eval_epochs=config["warmup"]["eval_epochs"],
-        num_is_samples=config["warmup"]["vae"]["num_is_samples"],
-        tx_vae=tx_vae,
-        model_vae=model_vae,
-    )
-
-    config_hardem = hlax.hard_em_lvm.CheckpointsConfig(
-        num_epochs=config["warmup"]["num_epochs"],
-        batch_size=config["warmup"]["batch_size"],
-        dim_latent=config["setup"]["dim_latent"],
-        eval_epochs=config["warmup"]["eval_epochs"],
-        num_its_params=config["warmup"]["hard_em"]["num_its_params"],
-        num_its_latent=config["warmup"]["hard_em"]["num_its_latent"],
-        tx_params=tx_params,
-        tx_latent=tx_latent,
-        model_decoder=model_decoder,
-    )
-
-    config_test = TestConfig(
+    pconfig = TestConfig(
         num_epochs=config["test"]["num_epochs"],
         num_is_samples=config["test"]["num_is_samples"],
         dim_latent=config["setup"]["dim_latent"],
         tx=tx_test,
-        model_encoder=model_encoder_test,
+        model_encoder=model_encoder,
         model_decoder=model_decoder,
     )
+    return pconfig
+
+
+def setup(config, model_vae, model_decoder, model_encoder_test):
+    config_vae = hlax.vae.load_config(config, model_vae)
+    config_hardem = hlax.hard_em_lvm.load_config(config, model_decoder)
+    config_test = load_test_config(config, model_encoder_test, model_decoder)
 
     return config_vae, config_hardem, config_test
 

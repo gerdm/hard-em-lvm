@@ -5,7 +5,7 @@ import optax
 import flax.linen as nn
 import jax.numpy as jnp
 from tqdm.auto import tqdm
-from typing import Callable
+from typing import Callable, Dict
 from functools import partial
 from flax.core import freeze, unfreeze
 from dataclasses import dataclass
@@ -24,6 +24,28 @@ class CheckpointsConfig:
     tx_vae: optax.GradientTransformation
     num_is_samples: int
 
+
+def load_config(
+    dict_config: Dict,
+    model: nn.Module,
+) -> CheckpointsConfig:
+    """
+    Load config from dict.
+    """
+    learning_rate = dict_config["train"]["learning_rate"]
+
+    tx_vae = optax.adam(learning_rate)
+
+    config = hlax.vae.CheckpointsConfig(
+        num_epochs=dict_config["train"]["num_epochs"],
+        batch_size=dict_config["train"]["batch_size"],
+        dim_latent=dict_config["setup"]["dim_latent"],
+        eval_epochs=dict_config["train"]["eval_epochs"],
+        num_is_samples=dict_config["train"]["vae"]["num_is_samples"],
+        tx_vae=tx_vae,
+        model_vae=model,
+    )
+    return config
 
 @partial(jax.jit, static_argnames="lossfn")
 def train_step(state, X, key, lossfn):
