@@ -125,7 +125,6 @@ def hard_nmll_bern(params, z_batch, X_batch, model):
         Decoder model (input z -> output x)
     """
     dim_latent = model.dim_latent
-
     logit_mean_x = model.apply(params, z_batch)
 
     dist_prior = distrax.MultivariateNormalDiag(jnp.zeros(dim_latent), jnp.ones(dim_latent))
