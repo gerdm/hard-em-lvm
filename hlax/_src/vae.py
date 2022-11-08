@@ -16,12 +16,10 @@ from flax.training.train_state import TrainState
 @dataclass
 class CheckpointsConfig:
     model_vae: nn.Module
-
     num_epochs: int
     batch_size: int
     dim_latent: int
     eval_epochs: list
-
     tx_vae: optax.GradientTransformation
     num_is_samples: int
 

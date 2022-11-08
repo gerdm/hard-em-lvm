@@ -23,7 +23,6 @@ import jax
 import hlax
 import optax
 import chex
-import numpy as np
 import flax.linen as nn
 from typing import Callable, Dict, Union
 from dataclasses import dataclass
