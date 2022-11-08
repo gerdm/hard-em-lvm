@@ -39,10 +39,9 @@ def iwae(key, params, apply_fn, X_batch):
 def iwae_bern(key, params, apply_fn, X_batch):
     """
     Importance-weighted marginal log-likelihood for
-    a Bernoulli decoder
+    a Bernoulli decoder.
+    The input is a batch of X in {0, 1}^{H x W x C}
     """
-    batch_size = len(X_batch)
-
     # keys = jax.random.split(key, batch_size)
     # encode_decode = jax.vmap(apply_fn, (None, 0, 0))
     # encode_decode = encode_decode(params, X_batch, keys)
