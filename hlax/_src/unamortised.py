@@ -3,11 +3,27 @@ Unamortised VAE
 """
 
 import jax
+import chex 
 import hlax
 import optax
+import jax.numpy as jnp
+import flax.linen as nn
+from time import time
+from tqdm.auto import tqdm
 from functools import partial
+from typing import Callable
 from flax.core import freeze, unfreeze
 from flax.training.train_state import TrainState
+
+
+class CheckpointsConfig:
+    model: nn.Module
+    num_epochs: int
+    batch_size: int
+    dim_latent: int
+    eval_epochs: list
+    tx: optax.GradientTransformation
+    num_is_samples: int
 
 
 @jax.jit
@@ -188,3 +204,52 @@ def train_epoch(key, X, state, batch_size, lossfn):
         losses += loss
 
     return losses / num_batches, state
+
+
+def train_checkpoints(
+    key: chex.ArrayDevice,
+    config: CheckpointsConfig,
+    X: chex.ArrayDevice,
+    lossfn: Callable,
+):
+    """
+    Find inference model parameters theta at multiple
+    epochs.
+    """
+    dict_params = {}
+    dict_times = {}
+    hist_loss = []
+    _, *dim_obs = X.shape
+
+    key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
+    keys_train = jax.random.split(key_train, config.num_epochs)
+
+    batch_init = jnp.ones((config.batch_size, *dim_obs))
+    params_init = config.model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+
+    state = TrainState(
+        apply_fn=partial(config.model.apply, num_samples=config.num_is_samples),
+        params=params_init,
+        tx=config.tx,
+    )
+
+    time_init = time()
+    for e, keyt in (pbar := tqdm(enumerate(keys_train), total=config.num_epochs)):
+        loss, state = hlax.unamortised.train_epoch(keyt, X, state, config.batch_size, lossfn)
+
+        hist_loss.append(loss)
+        pbar.set_description(f"loss={loss:0.5e}")
+
+        if (enum := e + 1) in config.eval_epochs:
+            time_ellapsed = time() - time_init
+            params_decoder = freeze({"params": unfreeze(state.params)["params"]["decoder"]})
+
+            dict_times[f"e{enum}"] = time_ellapsed
+            dict_params[f"e{enum}"] = params_decoder
+    
+    output = {
+        "times": dict_times,
+        "checkpoint_params": dict_params,
+        "hist_loss": jnp.array(hist_loss),
+    }
+    return output
