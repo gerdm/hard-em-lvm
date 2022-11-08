@@ -8,14 +8,16 @@ import hlax
 import optax
 import jax.numpy as jnp
 import flax.linen as nn
+from dataclasses import dataclass
 from time import time
 from tqdm.auto import tqdm
 from functools import partial
-from typing import Callable
+from typing import Callable, Dict
 from flax.core import freeze, unfreeze
 from flax.training.train_state import TrainState
 
 
+@dataclass
 class CheckpointsConfig:
     model: nn.Module
     num_epochs: int
@@ -24,6 +26,28 @@ class CheckpointsConfig:
     eval_epochs: list
     tx: optax.GradientTransformation
     num_is_samples: int
+
+
+def load_config(
+    dict_config: Dict,
+    model: nn.Module,
+) -> CheckpointsConfig:
+    """
+    Load config from dictionary.
+    """
+    learning_rate = dict_config["train"]["learning_rate"]
+    tx = optax.adam(learning_rate)
+
+    config = CheckpointsConfig(
+        num_epochs=dict_config["train"]["num_epochs"],
+        batch_size=dict_config["train"]["batch_size"],
+        dim_latent=dict_config["setup"]["dim_latent"],
+        eval_epochs=dict_config["train"]["eval_epochs"],
+        num_is_samples=dict_config["train"]["vae"]["num_is_samples"],
+        tx=tx,
+        model=model,
+    )
+    return config
 
 
 @jax.jit
@@ -219,15 +243,15 @@ def train_checkpoints(
     dict_params = {}
     dict_times = {}
     hist_loss = []
-    _, *dim_obs = X.shape
+    num_obs, *dim_obs = X.shape
 
     key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
     keys_train = jax.random.split(key_train, config.num_epochs)
 
-    batch_init = jnp.ones((config.batch_size, *dim_obs))
+    batch_init = jnp.ones((num_obs, *dim_obs))
     params_init = config.model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
-    state = TrainState(
+    state = TrainState.create(
         apply_fn=partial(config.model.apply, num_samples=config.num_is_samples),
         params=params_init,
         tx=config.tx,
