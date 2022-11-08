@@ -16,17 +16,15 @@ def load_fashion_mnist(n_train, n_test, melt=True, normalize=True, root=None):
     if melt:
         X_test = X_test.reshape(-1, 28 ** 2)
 
-
     xmax = X_train.max()
     X_train = X_train / xmax
+    X_test = X_test / xmax
 
     if normalize:
         xmean = X_train.mean()
         xstd = X_train.std()
 
         X_train = (X_train - xmean) / xstd
-
-        X_test = X_test / xmax
         X_test = (X_test - xmean) / xstd
 
     return (X_train, y_train), (X_test, y_test)
