@@ -144,9 +144,10 @@ def update_state_batch(key, X_batch, state_batch, lossfn):
     return loss, new_state_batch
 
 
-def e_step(_, state, lossfn, X, params_m, zero_grads_m):
+def e_step(_, state, lossfn, X, zero_grads_m):
     params_encoder = state.params["params"]["encoder"]
-    grads_encoder = jax.grad(lossfn, 0)(params_encoder, params_m, X)
+    params_decoder = state.params["params"]["decoder"]
+    grads_encoder = jax.grad(lossfn, 0)(params_encoder, params_decoder, X)
     grads_patch = freeze({
         "params": {
             "encoder": grads_encoder,
@@ -157,9 +158,10 @@ def e_step(_, state, lossfn, X, params_m, zero_grads_m):
     return state
 
 
-def m_step(_, state, lossfn, X, params_e, zero_grads_e):
+def m_step(_, state, lossfn, X, zero_grads_e):
     params_decoder = state.params["params"]["decoder"]
-    grads_decoder = jax.grad(lossfn, 1)(params_e, params_decoder, X)
+    params_encoder = state.params["params"]["encoder"]
+    grads_decoder = jax.grad(lossfn, 1)(params_encoder, params_decoder, X)
     grads_patch = freeze({
         "params": {
             "encoder": zero_grads_e,
@@ -183,40 +185,30 @@ def update_state_batch_em(key, X_batch, state_batch, lossfn):
             }
         })
         return lossfn(key, params, state_batch.apply_fn, X)
-    
-    loss_encoder_step = jax.grad(part_lossfn, 0)
-    loss_decoder_step = jax.grad(part_lossfn, 1)
 
     # E-step
     params_decoder = state_batch.params["params"]["decoder"]
     grads_zero_decoder = jax.tree_map(lambda x: x * 0, params_decoder)
-    for _ in range(5):
-        params_encoder = state_batch.params["params"]["encoder"]
-        grads_encoder = loss_encoder_step(params_encoder, params_decoder, X_batch)
-        grads_e = freeze({
-            "params": {
-                "encoder": grads_encoder,
-                "decoder": grads_zero_decoder,
-            }
-        })
-        state_batch = state_batch.apply_gradients(grads=grads_e)
+    part_e_step = partial(
+        e_step,
+        lossfn=part_lossfn,
+        X=X_batch,
+        zero_grads_m=grads_zero_decoder
+    )
+    state_batch = jax.lax.fori_loop(0, 10, part_e_step, state_batch)
 
     # M-step
     params_encoder = state_batch.params["params"]["encoder"]
     grads_zero_encoder = jax.tree_map(lambda x: x * 0, params_encoder)
-    for _ in range(5):
-        params_decoder = state_batch.params["params"]["decoder"]
-        grads_decoder = loss_decoder_step(params_encoder, params_decoder, X_batch)
-        grads_m = freeze({
-            "params": {
-                "encoder": grads_zero_encoder,
-                "decoder": grads_decoder,
-            }
-        })
-
-        state_batch = state_batch.apply_gradients(grads=grads_m)
+    part_m_step = partial(
+        m_step,
+        lossfn=part_lossfn,
+        X=X_batch,
+        zero_grads_e=grads_zero_encoder
+    )
+    state_batch = jax.lax.fori_loop(0, 5, part_m_step, state_batch)
     
-    loss = part_lossfn(params_encoder, params_decoder, key)
+    loss = lossfn(key, state_batch.params, state_batch.apply_fn, X_batch)
     return loss, state_batch
 
 
@@ -280,14 +272,15 @@ def update_reconstruct_state(state, new_params, new_opt_state):
     return new_state
 
 
-# TODO: Add support for multiple E and M steps
 @partial(jax.jit, static_argnames=("lossfn",))
-def train_step_ix(key, X, state, ixs, lossfn):
+def train_step_batch(key, X, state, ixs, lossfn):
     X_batch = X[ixs]
     state_batch = create_state_batch(state, ixs)
     loss, new_state_batch = update_state_batch_em(key, X_batch, state_batch, lossfn)
+    
     new_params = reconstruct_params(state, new_state_batch, ixs)
     new_opt_state = reconstruct_opt_state(state, new_state_batch, ixs)
+
     new_state = update_reconstruct_state(state, new_params, new_opt_state)
     return loss, new_state
 
@@ -301,7 +294,7 @@ def train_epoch(key, X, state, batch_size, lossfn):
 
     losses = 0
     for batch_ix, key_epoch in zip(batch_ixs, keys_train):
-        loss, state = train_step_ix(key_epoch, X, state, batch_ix, lossfn)
+        loss, state = train_step_batch(key_epoch, X, state, batch_ix, lossfn)
         losses += loss
 
     return losses / num_batches, state
