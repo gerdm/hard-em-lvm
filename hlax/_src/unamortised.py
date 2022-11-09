@@ -24,6 +24,10 @@ class CheckpointsConfig:
     batch_size: int
     dim_latent: int
     eval_epochs: list
+
+    num_e_steps: int
+    num_m_steps: int
+
     tx: optax.GradientTransformation
     num_is_samples: int
 
@@ -44,6 +48,8 @@ def load_config(
         dim_latent=dict_config["setup"]["dim_latent"],
         eval_epochs=dict_config["train"]["eval_epochs"],
         num_is_samples=dict_config["train"]["vae"]["num_is_samples"],
+        num_m_steps=dict_config["train"]["hard_em"]["num_its_params"],
+        num_e_steps=dict_config["train"]["hard_em"]["num_its_latent"],
         tx=tx,
         model=model,
     )
@@ -53,7 +59,8 @@ def load_config(
 @jax.jit
 def get_batch_adam_params_encoder(opt_state, ixs):
     """
-    Get mu and nu optimiser parameters
+    Get mu and nu optimiser parameters for a batch of
+    observations.
     """
     encoder_sub_mu = opt_state[0].mu["params"]["encoder"]
     encoder_sub_nu = opt_state[0].nu["params"]["encoder"]
@@ -113,7 +120,10 @@ def update_pytree(pytree, pytree_subset, ixs):
 @jax.jit
 def create_state_batch(state, ixs):
     """
-    Create a batch of the unamortised TrainStep
+    Create a TrainState object for a batch of observations.
+    We create this train state with
+    1. The subset of parameters for the batch
+    2. The subset of optimiser parameters for the batch
     """
     params_batch_encoder = jax.tree_map(lambda x: x[ixs], state.params["params"]["encoder"])
     params_batch = freeze({
@@ -159,8 +169,8 @@ def e_step(_, state, lossfn, X, zero_grads_m):
 
 
 def m_step(_, state, lossfn, X, zero_grads_e):
-    params_decoder = state.params["params"]["decoder"]
     params_encoder = state.params["params"]["encoder"]
+    params_decoder = state.params["params"]["decoder"]
     grads_decoder = jax.grad(lossfn, 1)(params_encoder, params_decoder, X)
     grads_patch = freeze({
         "params": {
@@ -175,8 +185,9 @@ def m_step(_, state, lossfn, X, zero_grads_e):
 @partial(jax.jit, static_argnames=("lossfn",))
 def update_state_batch_em(key, X_batch, state_batch, lossfn):
     """
-    Update the state using the EM algorithm.
+    Update the train state using the EM algorithm.
     """
+    apply_fn = state_batch.apply_fn
     def part_lossfn(params_encoder, params_decoder, X):
         params = freeze({
             "params": {
@@ -184,29 +195,29 @@ def update_state_batch_em(key, X_batch, state_batch, lossfn):
                 "decoder": params_decoder
             }
         })
-        return lossfn(key, params, state_batch.apply_fn, X)
+        return lossfn(key, params, apply_fn, X)
 
     # E-step
     params_decoder = state_batch.params["params"]["decoder"]
-    grads_zero_decoder = jax.tree_map(lambda x: x * 0, params_decoder)
+    grads_zero_decoder = jax.tree_map(lambda _: 0, params_decoder)
     part_e_step = partial(
         e_step,
         lossfn=part_lossfn,
         X=X_batch,
         zero_grads_m=grads_zero_decoder
     )
-    state_batch = jax.lax.fori_loop(0, 10, part_e_step, state_batch)
+    state_batch = jax.lax.fori_loop(0, 20, part_e_step, state_batch)
 
     # M-step
     params_encoder = state_batch.params["params"]["encoder"]
-    grads_zero_encoder = jax.tree_map(lambda x: x * 0, params_encoder)
+    grads_zero_encoder = jax.tree_map(lambda _: 0, params_encoder)
     part_m_step = partial(
         m_step,
         lossfn=part_lossfn,
         X=X_batch,
         zero_grads_e=grads_zero_encoder
     )
-    state_batch = jax.lax.fori_loop(0, 5, part_m_step, state_batch)
+    state_batch = jax.lax.fori_loop(0, 10, part_m_step, state_batch)
     
     loss = lossfn(key, state_batch.params, state_batch.apply_fn, X_batch)
     return loss, state_batch
@@ -263,7 +274,7 @@ def reconstruct_opt_state(state, new_state_batch, ixs):
 @jax.jit
 def update_reconstruct_state(state, new_params, new_opt_state):
     new_state = TrainState(
-        step=state.step,
+        step=state.step + 1,
         apply_fn=state.apply_fn,
         tx=state.tx,
         params=new_params,
@@ -329,7 +340,7 @@ def train_checkpoints(
 
     time_init = time()
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=config.num_epochs)):
-        loss, state = hlax.unamortised.train_epoch(keyt, X, state, config.batch_size, lossfn)
+        loss, state = train_epoch(keyt, X, state, config.batch_size, lossfn)
 
         hist_loss.append(loss)
         pbar.set_description(f"loss={loss:0.5e}")
