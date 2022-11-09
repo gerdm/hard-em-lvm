@@ -183,7 +183,8 @@ def m_step(_, state, lossfn, X, zero_grads_e):
 
 
 @partial(jax.jit, static_argnames=("lossfn",))
-def update_state_batch_em(key, X_batch, state_batch, lossfn):
+def update_state_batch_em(key, X_batch, state_batch,
+                          num_e_steps, num_m_steps, lossfn):
     """
     Update the train state using the EM algorithm.
     """
@@ -206,7 +207,7 @@ def update_state_batch_em(key, X_batch, state_batch, lossfn):
         X=X_batch,
         zero_grads_m=grads_zero_decoder
     )
-    state_batch = jax.lax.fori_loop(0, 20, part_e_step, state_batch)
+    state_batch = jax.lax.fori_loop(0, num_e_steps, part_e_step, state_batch)
 
     # M-step
     params_encoder = state_batch.params["params"]["encoder"]
@@ -217,7 +218,7 @@ def update_state_batch_em(key, X_batch, state_batch, lossfn):
         X=X_batch,
         zero_grads_e=grads_zero_encoder
     )
-    state_batch = jax.lax.fori_loop(0, 10, part_m_step, state_batch)
+    state_batch = jax.lax.fori_loop(0, num_m_steps, part_m_step, state_batch)
     
     loss = lossfn(key, state_batch.params, state_batch.apply_fn, X_batch)
     return loss, state_batch
@@ -284,10 +285,11 @@ def update_reconstruct_state(state, new_params, new_opt_state):
 
 
 @partial(jax.jit, static_argnames=("lossfn",))
-def train_step_batch(key, X, state, ixs, lossfn):
+def train_step_batch(key, X, state, ixs, num_e_steps, num_m_steps, lossfn):
     X_batch = X[ixs]
     state_batch = create_state_batch(state, ixs)
-    loss, new_state_batch = update_state_batch_em(key, X_batch, state_batch, lossfn)
+    loss, new_state_batch = update_state_batch_em(key, X_batch, state_batch, 
+                                                  num_e_steps, num_m_steps, lossfn)
     
     new_params = reconstruct_params(state, new_state_batch, ixs)
     new_opt_state = reconstruct_opt_state(state, new_state_batch, ixs)
@@ -296,7 +298,7 @@ def train_step_batch(key, X, state, ixs, lossfn):
     return loss, new_state
 
 
-def train_epoch(key, X, state, batch_size, lossfn):
+def train_epoch(key, X, state, batch_size, num_e_steps, num_m_steps, lossfn):
     num_obs = X.shape[0]
     key_batch, key_train = jax.random.split(key)
     batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_obs, batch_size)
@@ -305,7 +307,8 @@ def train_epoch(key, X, state, batch_size, lossfn):
 
     losses = 0
     for batch_ix, key_epoch in zip(batch_ixs, keys_train):
-        loss, state = train_step_batch(key_epoch, X, state, batch_ix, lossfn)
+        loss, state = train_step_batch(key_epoch, X, state, batch_ix,
+                                       num_e_steps, num_m_steps, lossfn)
         losses += loss
 
     return losses / num_batches, state
@@ -338,9 +341,12 @@ def train_checkpoints(
         tx=config.tx,
     )
 
+    num_e_steps = config.num_e_steps
+    num_m_steps = config.num_m_steps
     time_init = time()
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=config.num_epochs)):
-        loss, state = train_epoch(keyt, X, state, config.batch_size, lossfn)
+        loss, state = train_epoch(keyt, X, state, config.batch_size,
+                                  num_e_steps, num_m_steps, lossfn)
 
         hist_loss.append(loss)
         pbar.set_description(f"loss={loss:0.5e}")
