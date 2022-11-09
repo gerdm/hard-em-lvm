@@ -277,7 +277,7 @@ def train_epoch_adam(key, params, z_est, opt_states, observations,
         opt_states = reconstruct_full_adam_params(opt_states, opt_states_batch, batch_ix)
 
         total_nll += nll
-    return total_nll, params, z_est, opt_states
+    return total_nll / num_batches, params, z_est, opt_states
 
 
 def train_epoch(key, params, z_est, opt_states, observations,
