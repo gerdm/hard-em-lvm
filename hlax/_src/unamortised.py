@@ -144,6 +144,82 @@ def update_state_batch(key, X_batch, state_batch, lossfn):
     return loss, new_state_batch
 
 
+def e_step(_, state, lossfn, X, params_m, zero_grads_m):
+    params_encoder = state.params["params"]["encoder"]
+    grads_encoder = jax.grad(lossfn, 0)(params_encoder, params_m, X)
+    grads_patch = freeze({
+        "params": {
+            "encoder": grads_encoder,
+            "decoder": zero_grads_m
+        }
+    })
+    state = state.apply_gradients(grads=grads_patch)
+    return state
+
+
+def m_step(_, state, lossfn, X, params_e, zero_grads_e):
+    params_decoder = state.params["params"]["decoder"]
+    grads_decoder = jax.grad(lossfn, 1)(params_e, params_decoder, X)
+    grads_patch = freeze({
+        "params": {
+            "encoder": zero_grads_e,
+            "decoder": grads_decoder
+        }
+    })
+    state = state.apply_gradients(grads=grads_patch)
+    return state
+
+
+@partial(jax.jit, static_argnames=("lossfn",))
+def update_state_batch_em(key, X_batch, state_batch, lossfn):
+    """
+    Update the state using the EM algorithm.
+    """
+    def part_lossfn(params_encoder, params_decoder, X):
+        params = freeze({
+            "params": {
+                "encoder": params_encoder,
+                "decoder": params_decoder
+            }
+        })
+        return lossfn(key, params, state_batch.apply_fn, X)
+    
+    loss_encoder_step = jax.grad(part_lossfn, 0)
+    loss_decoder_step = jax.grad(part_lossfn, 1)
+
+    # E-step
+    params_decoder = state_batch.params["params"]["decoder"]
+    grads_zero_decoder = jax.tree_map(lambda x: x * 0, params_decoder)
+    for _ in range(5):
+        params_encoder = state_batch.params["params"]["encoder"]
+        grads_encoder = loss_encoder_step(params_encoder, params_decoder, X_batch)
+        grads_e = freeze({
+            "params": {
+                "encoder": grads_encoder,
+                "decoder": grads_zero_decoder,
+            }
+        })
+        state_batch = state_batch.apply_gradients(grads=grads_e)
+
+    # M-step
+    params_encoder = state_batch.params["params"]["encoder"]
+    grads_zero_encoder = jax.tree_map(lambda x: x * 0, params_encoder)
+    for _ in range(5):
+        params_decoder = state_batch.params["params"]["decoder"]
+        grads_decoder = loss_decoder_step(params_encoder, params_decoder, X_batch)
+        grads_m = freeze({
+            "params": {
+                "encoder": grads_zero_encoder,
+                "decoder": grads_decoder,
+            }
+        })
+
+        state_batch = state_batch.apply_gradients(grads=grads_m)
+    
+    loss = part_lossfn(params_encoder, params_decoder, key)
+    return loss, state_batch
+
+
 @jax.jit
 def reconstruct_params(state, new_state_batch, ixs):
     params_encoder_update = unfreeze(state.params["params"]["encoder"])
@@ -204,11 +280,12 @@ def update_reconstruct_state(state, new_params, new_opt_state):
     return new_state
 
 
+# TODO: Add support for multiple E and M steps
 @partial(jax.jit, static_argnames=("lossfn",))
 def train_step_ix(key, X, state, ixs, lossfn):
     X_batch = X[ixs]
     state_batch = create_state_batch(state, ixs)
-    loss, new_state_batch = update_state_batch(key, X_batch, state_batch, lossfn)
+    loss, new_state_batch = update_state_batch_em(key, X_batch, state_batch, lossfn)
     new_params = reconstruct_params(state, new_state_batch, ixs)
     new_opt_state = reconstruct_opt_state(state, new_state_batch, ixs)
     new_state = update_reconstruct_state(state, new_params, new_opt_state)
@@ -275,5 +352,6 @@ def train_checkpoints(
         "times": dict_times,
         "checkpoint_params": dict_params,
         "hist_loss": jnp.array(hist_loss),
+        "state_final": state
     }
     return output
