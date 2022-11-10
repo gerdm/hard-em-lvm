@@ -119,5 +119,6 @@ def train_checkpoints(
         "times": dict_times,
         "checkpoint_params": dict_params,
         "hist_loss": jnp.array(hist_loss),
+        "state_final": state,
     }
     return output
