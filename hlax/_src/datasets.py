@@ -13,6 +13,7 @@ def load_fashion_mnist(n_train, n_test, melt=True, normalize=True, root=None):
 
     y_test = jnp.array(mnist_test.targets)[:n_test]
     X_test = jnp.array(mnist_test.data)[:n_test]
+
     if melt:
         X_test = X_test.reshape(-1, 28 ** 2)
 
