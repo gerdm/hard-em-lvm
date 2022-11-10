@@ -154,6 +154,26 @@ def update_state_batch(key, X_batch, state_batch, lossfn):
     return loss, new_state_batch
 
 
+@partial(jax.jit, static_argnames=("entry_name",))
+def adam_reconstruct_opt_state(state, old_mu, old_nu, entry_name):
+    opt_state_update = state.opt_state
+    mu_update = unfreeze(opt_state_update[0].mu)
+    nu_update = unfreeze(opt_state_update[0].nu)
+
+    mu_update["params"][entry_name] = old_mu
+    nu_update["params"][entry_name] = old_nu
+
+    opt_state_update = (
+        opt_state_update[0]._replace(
+            mu=freeze(mu_update),
+            nu=freeze(nu_update)
+        ),
+    ) + opt_state_update[1:]
+
+    state_update = state.replace(opt_state=opt_state_update)
+    return state_update
+
+
 def e_step(_, state, lossfn, X, zero_grads_m):
     params_encoder = state.params["params"]["encoder"]
     params_decoder = state.params["params"]["decoder"]
@@ -199,8 +219,12 @@ def update_state_batch_em(key, X_batch, state_batch,
         return lossfn(key, params, apply_fn, X)
 
     # E-step
-    params_decoder = state_batch.params["params"]["decoder"]
+    params_fixed = "decoder"
+    params_decoder = state_batch.params["params"][params_fixed]
     grads_zero_decoder = jax.tree_map(lambda _: 0, params_decoder)
+    old_mu_params = state_batch.opt_state[0].mu["params"][params_fixed]
+    old_nu_params = state_batch.opt_state[0].nu["params"][params_fixed]
+
     part_e_step = partial(
         e_step,
         lossfn=part_lossfn,
@@ -209,9 +233,21 @@ def update_state_batch_em(key, X_batch, state_batch,
     )
     state_batch = jax.lax.fori_loop(0, num_e_steps, part_e_step, state_batch)
 
+    # Put decoder opt state back to original
+    state_batch = adam_reconstruct_opt_state(
+        state_batch,
+        old_mu_params,
+        old_nu_params,
+        params_fixed
+    )
+
     # M-step
-    params_encoder = state_batch.params["params"]["encoder"]
+    params_fixed = "encoder"
+    params_encoder = state_batch.params["params"][params_fixed]
     grads_zero_encoder = jax.tree_map(lambda _: 0, params_encoder)
+    old_mu_params = state_batch.opt_state[0].mu["params"][params_fixed]
+    old_nu_params = state_batch.opt_state[0].nu["params"][params_fixed]
+
     part_m_step = partial(
         m_step,
         lossfn=part_lossfn,
@@ -219,6 +255,14 @@ def update_state_batch_em(key, X_batch, state_batch,
         zero_grads_e=grads_zero_encoder
     )
     state_batch = jax.lax.fori_loop(0, num_m_steps, part_m_step, state_batch)
+
+    # Put encoder opt state back to original
+    state_batch = adam_reconstruct_opt_state(
+        state_batch,
+        old_mu_params,
+        old_nu_params,
+        params_fixed,
+    )
     
     loss = lossfn(key, state_batch.params, state_batch.apply_fn, X_batch)
     return loss, state_batch
