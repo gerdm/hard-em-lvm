@@ -77,6 +77,8 @@ def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_los
     decoder_test = config_test.model_decoder
 
     checkpoint_vals = output["checkpoint_params"].keys()
+
+    dict_params = {}
     dict_mll_epochs = {}
     for keyv in tqdm(checkpoint_vals):
         params_decoder = output["checkpoint_params"][keyv]
@@ -86,7 +88,13 @@ def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_los
                                           leave=False)
         mll_values = -vmap_loss_encoder(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, num_is_samples)
         dict_mll_epochs[keyv] = mll_values
-    return dict_mll_epochs
+        dict_params[keyv] = res["params"]
+    
+    res = {
+        "mll_epochs": dict_mll_epochs,
+        "params": dict_params,
+    }
+    return res
 
 
 def train_test(
