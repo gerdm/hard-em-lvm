@@ -265,6 +265,7 @@ def train_epoch_adam(key, params, z_est, opt_states, observations,
         # Decompose batch params for E-step
         opt_states_batch = create_batch_adam_params(opt_states, batch_ix)
 
+        # Perform a train step
         res = train_step(params, z_batch, opt_states_batch,
                         tx_params=tx_params, tx_latent=tx_latent,
                         n_its_params=n_its_params, n_its_latent=n_its_latent,
@@ -371,5 +372,6 @@ def train_checkpoints(
         "times": dict_times,
         "checkpoint_params": dict_params,
         "hist_loss": jnp.array(hist_loss),
+        "state_final": (params_decoder, z_est),
     }
     return output
