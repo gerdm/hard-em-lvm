@@ -428,3 +428,52 @@ def train_checkpoints(
         "state_final": state
     }
     return output
+
+
+def test_decoder(
+    key: chex.ArrayDevice,
+    config: CheckpointsConfig,
+    X: chex.ArrayDevice,
+    lossfn: Callable,
+    decoder_params: nn.FrozenDict,
+):
+    """
+    Test the decoder parameters by learning the parameters
+    of an unamortised encoder using the IWAE estimator.
+    For this, we keep the parameter of the decoder fixed
+    (num_m_steps=0) and we train the encoder for config.num_epochs
+    epochs.
+    """
+    hist_loss = []
+    num_obs, *dim_obs = X.shape
+    key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
+    keys_train = jax.random.split(key_train, config.num_epochs)
+    batch_init = jnp.ones((num_obs, *dim_obs))
+    params_init = config.model.init(key_params_init, batch_init, key_eps_init)
+
+    # Replace the parameters of the decoder with the
+    # learned parameters
+    params_init = unfreeze(params_init)
+    params_init["params"]["decoder"] = decoder_params
+    params_init = freeze(params_init)
+
+    state = TrainState.create(
+        apply_fn=partial(config.model.apply, num_samples=config.num_is_samples),
+        params=params_init,
+        tx=config.tx,
+    )
+
+    num_e_steps = config.num_e_steps
+    num_m_steps = config.num_m_steps
+    pbar = tqdm(keys_train, leave=False)
+    for keyt in pbar:
+        loss, state = train_epoch(keyt, X, state, config.batch_size,
+                                  num_e_steps, num_m_steps, lossfn)
+        pbar.set_description(f"loss={loss:0.5e}")
+        hist_loss.append(loss)
+    
+    res = {
+        "hist_loss": jnp.array(hist_loss),
+        "state": state
+    }
+    return res
