@@ -21,77 +21,45 @@ the importance sampling estimator.
 
 import jax
 import hlax
-import optax
 import chex
 import flax.linen as nn
 from typing import Callable, Dict, Union
-from dataclasses import dataclass
 from tqdm.auto import tqdm
 
 
-@dataclass
-class TestConfig:
-    num_epochs: int
-    num_is_samples: int
-    dim_latent: int
-    tx: optax.GradientTransformation
-    model_encoder: nn.Module # Unamortised
-    model_decoder: nn.Module
-
-
-def load_test_config(
-    config: Dict,
-    model_encoder: nn.Module,
-    model_decoder: nn.Module,
-) -> TestConfig:
-    """
-    Load the test configuration.
-    """
-    learning_rate = config["test"]["learning_rate"]
-    tx_test = optax.adam(learning_rate)
-
-    pconfig = TestConfig(
-        num_epochs=config["test"]["num_epochs"],
-        num_is_samples=config["test"]["num_is_samples"],
-        dim_latent=config["setup"]["dim_latent"],
-        tx=tx_test,
-        model_encoder=model_encoder,
-        model_decoder=model_decoder,
-    )
-    return pconfig
-
-
-def setup(config, model_vae, model_decoder, model_encoder_test):
+def setup(config, model_vae, model_decoder, model_test):
     config_vae = hlax.vae.load_config(config, model_vae)
     config_hardem = hlax.hard_em_lvm.load_config(config, model_decoder)
-    config_test = load_test_config(config, model_encoder_test, model_decoder)
+    config_test = hlax.unamortised.load_test_config(config, model_test, model_decoder)
 
     return config_vae, config_hardem, config_test
 
 
-def test_decoder_params(key, config_test, output, X, grad_loss_encoder, vmap_loss_encoder, num_is_samples=50):
-    key_train, key_eval = jax.random.split(key)
-    keys_eval = jax.random.split(key_eval, len(X))
-
-    encoder_test = config_test.model_encoder
-    decoder_test = config_test.model_decoder
-
-    checkpoint_vals = output["checkpoint_params"].keys()
+def test_decoder_checkpoints(
+    key: chex.ArrayDevice,
+    X: chex.ArrayDevice,
+    config_test: hlax.unamortised.Config,
+    checkpoint_params: Dict,
+    lossfn: Callable,
+) -> Dict:
+    checkpoint_vals = checkpoint_params.keys()
+    num_checkpoints = len(checkpoint_vals)
+    keys = jax.random.split(key, num_checkpoints)
 
     dict_params = {}
-    dict_mll_epochs = {}
-    for keyv in tqdm(checkpoint_vals):
-        params_decoder = output["checkpoint_params"][keyv]
-        res = hlax.training.train_encoder(key_train, X, encoder_test, decoder_test,
-                                          params_decoder, config_test.tx, config_test.num_epochs,
-                                          grad_loss_encoder, config_test.num_is_samples,
-                                          leave=False)
-        mll_values = -vmap_loss_encoder(keys_eval, res["params"], params_decoder, X, encoder_test, decoder_test, num_is_samples)
-        dict_mll_epochs[keyv] = mll_values
-        dict_params[keyv] = res["params"]
+    dict_losses = {}
+    pbar = tqdm(zip(keys, checkpoint_vals), total=num_checkpoints)
+    for key_checkpoint, epoch_name in pbar:
+        params_checkpoint = checkpoint_params[epoch_name]["params"]
+        res_checkpoint = hlax.unamortised.test_decoder(key_checkpoint, config_test, X, lossfn, params_checkpoint)
+        params_test = res_checkpoint["state"].params
+        hist_loss = res_checkpoint["hist_loss"]
+
+        dict_params[epoch_name] = params_test
+        dict_losses[epoch_name] = hist_loss
     
     res = {
-        "mll_epochs": dict_mll_epochs,
+        "mll_epochs": dict_losses,
         "params": dict_params,
     }
     return res
@@ -101,17 +69,18 @@ def train_test(
     key: chex.ArrayDevice,
     X_train: chex.ArrayDevice,
     X_test: chex.ArrayDevice,
-    config_train: Union[hlax.hard_em_lvm.CheckpointsConfig,
+    config_train: Union[hlax.unamortised.CheckpointsConfig,
                         hlax.vae.CheckpointsConfig],
-    config_test: TestConfig,
+    config_test: hlax.unamortised.Config,
     lossfn_train: Callable,
-    vmap_loss_encoder_test: Callable,
-    grad_loss_encoder_test: Callable,
+    lossfn_test: Callable,
     train_checkpoints: Callable
 ) -> Dict:
     key_train, key_test = jax.random.split(key)
     output_train = train_checkpoints(key_train, config_train, X_train, lossfn_train)
-    output_test = test_decoder_params(key_test, config_test, output_train, X_test, grad_loss_encoder_test, vmap_loss_encoder_test)
+
+    checkpoint_params = output_train["checkpoint_params"]
+    output_test = test_decoder_checkpoints(key_test, X_test, config_test, checkpoint_params, lossfn_test)
     
     res = {
         "train": output_train,
