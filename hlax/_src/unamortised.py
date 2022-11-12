@@ -18,6 +18,18 @@ from flax.training.train_state import TrainState
 
 
 @dataclass
+class Config:
+    batch_size: int
+    num_epochs: int
+    num_is_samples: int
+    dim_latent: int
+    tx: optax.GradientTransformation
+    model: nn.Module
+    num_e_steps: int
+    num_m_steps: int = 0
+
+
+@dataclass
 class CheckpointsConfig:
     model: nn.Module
     num_epochs: int
@@ -30,6 +42,26 @@ class CheckpointsConfig:
 
     tx: optax.GradientTransformation
     num_is_samples: int
+
+
+def load_test_config(
+    dict_config: Dict,
+    model: nn.Module,
+) -> Config:
+    learning_rate = dict_config["test"]["learning_rate"]
+    tx = optax.adam(learning_rate)
+
+    config = Config(
+        batch_size=dict_config["test"]["batch_size"],
+        num_epochs=dict_config["test"]["num_epochs"],
+        num_is_samples=dict_config["test"]["num_is_samples"],
+        dim_latent=dict_config["setup"]["dim_latent"],
+        num_e_steps=dict_config["test"]["num_e_steps"],
+        num_m_steps=dict_config["test"]["num_m_steps"],
+        tx=tx,
+        model=model,
+    )
+    return config
 
 
 def load_config(
