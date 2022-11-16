@@ -253,3 +253,17 @@ class UnamortisedVAEBern(nn.Module):
         z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
         logit_mean_x = self.decoder(z)
         return z, (mean_z, logvar_z), logit_mean_x
+
+
+class DeltaEncoder(nn.Module):
+    dim_latent: int
+    normal_init: Callable = nn.initializers.normal()
+
+    def setup(self):
+        self.z = self.param("z", self.normal_init, (self.dim_latent,))
+
+    def __call__(self, _):
+        """
+        Input x (_) is a dummy variable
+        """
+        return self.z
