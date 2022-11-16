@@ -52,15 +52,15 @@ def test_decoder_checkpoints(
     for key_checkpoint, epoch_name in pbar:
         params_checkpoint = checkpoint_params[epoch_name]["params"]
         res_checkpoint = hlax.unamortised.test_decoder(key_checkpoint, config_test, X, lossfn, params_checkpoint)
-        params_test = res_checkpoint["state"].params
+        params_test = res_checkpoint["state"]
         hist_loss = res_checkpoint["hist_loss"]
 
         dict_params[epoch_name] = params_test
         dict_losses[epoch_name] = hist_loss
     
     res = {
-        "mll_epochs": dict_losses,
-        "params": dict_params,
+        "hist_loss": dict_losses,
+        "state": dict_params,
     }
     return res
 
