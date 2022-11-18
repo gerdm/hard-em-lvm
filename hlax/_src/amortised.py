@@ -15,16 +15,14 @@ from flax.training.train_state import TrainState
 
 
 @dataclass
-class CheckpointsConfig:
-    model_vae: nn.Module
+class TrainConfig:
     num_epochs: int
     batch_size: int
-    dim_latent: int
+
+
+@dataclass
+class CheckpointsConfig(TrainConfig):
     eval_epochs: list
-    tx_vae: optax.GradientTransformation
-    num_is_samples: int
-    e_step: bool = True
-    m_step: bool = True
 
 
 def load_config(
@@ -36,7 +34,7 @@ def load_config(
     """
     learning_rate = dict_config["train"]["learning_rate"]
 
-    tx_vae = optax.adam(learning_rate)
+    tx = optax.adam(learning_rate)
 
     config = hlax.vae.CheckpointsConfig(
         num_epochs=dict_config["train"]["num_epochs"],
@@ -44,8 +42,8 @@ def load_config(
         dim_latent=dict_config["setup"]["dim_latent"],
         eval_epochs=dict_config["train"]["eval_epochs"],
         num_is_samples=dict_config["train"]["vae"]["num_is_samples"],
-        tx_vae=tx_vae,
-        model_vae=model,
+        tx=tx,
+        model=model,
     )
     return config
 
@@ -137,6 +135,45 @@ def train_epoch_encoder(key, state, X, batch_size, lossfn):
     return total_loss.item(), state
 
 
+def train_epoch(key, state, X, batch_size, lossfn):
+    num_samples = len(X)
+    key_batch, keys_vae = jax.random.split(key)
+    batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_samples, batch_size)
+    
+    num_batches = len(batch_ixs)
+    keys_vae = jax.random.split(keys_vae, num_batches)
+    
+    total_loss = 0
+    for key_vae, batch_ix in zip(keys_vae, batch_ixs):
+        X_batch = hlax.training.index_values_batch(X, batch_ix)
+        loss, state = train_step(state, X_batch, key_vae, lossfn)
+        total_loss += loss
+    
+    return total_loss.item(), state
+
+
+def train_encoder(
+    key: chex.ArrayDevice,
+    config: TrainConfig,
+    X: chex.ArrayDevice,
+    state: TrainState,
+    lossfn: Callable,
+):
+    """
+    Train the inference network of a latent variable model.
+    We fix the parameters of the generative model (decoder)
+    and only update the parameters of the inference model (encoder).
+    """
+    hist_loss = []
+    keys_train = jax.random.split(key, config.num_epochs)
+    pbar = tqdm(keys_train)
+    for keyt in pbar:
+        loss, state = train_epoch_encoder(keyt, state, X, config.batch_size, lossfn)
+        hist_loss.append(loss)
+        pbar.set_description(f"generative-{loss=:.3e}")
+    return state, hist_loss
+
+
 def train_checkpoints(
     key: chex.ArrayDevice,
     config: CheckpointsConfig,
@@ -155,12 +192,12 @@ def train_checkpoints(
     keys_train = jax.random.split(key_train, config.num_epochs)
     batch_init = jnp.ones((config.batch_size, *dim_obs))
 
-    params_init = config.model_vae.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+    params_init = config.model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
     state = TrainState.create(
-        apply_fn=partial(config.model_vae.apply, num_samples=config.num_is_samples),
+        apply_fn=partial(config.model.apply, num_samples=config.num_is_samples),
         params=params_init,
-        tx=config.tx_vae,
+        tx=config.tx,
         )
 
     time_init = time()
