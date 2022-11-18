@@ -292,9 +292,9 @@ def update_state_batch_em(key, X_batch, state_batch,
     # M-step preprocessing: Accumulate gradients
     params_encoder = state_batch.params["params"]["encoder"]
     params_decoder = state_batch.params["params"]["decoder"]
-    grads_decoder = jax.grad(part_lossfn, 1)(params_encoder, params_decoder, X_batch)
+    loss_batch, grads_decoder = jax.value_and_grad(part_lossfn, 1)(params_encoder, params_decoder, X_batch)
 
-    return state_batch, grads_decoder
+    return state_batch, grads_decoder, loss_batch
 
 
 @jax.jit
@@ -361,14 +361,14 @@ def update_reconstruct_state(state, new_params, new_opt_state):
 def train_step_batch(key, X, state, ixs, num_e_steps, num_m_steps, lossfn):
     X_batch = X[ixs]
     state_batch = create_state_batch(state, ixs)
-    new_state_batch, m_step_grads = update_state_batch_em(
+    new_state_batch, m_step_grads, loss_batch = update_state_batch_em(
         key, X_batch, state_batch, num_e_steps, num_m_steps, lossfn
     )
     
     new_params = reconstruct_params(state, new_state_batch, ixs)
     new_opt_state = reconstruct_opt_state(state, new_state_batch, ixs)
     new_state = update_reconstruct_state(state, new_params, new_opt_state)
-    return new_state, m_step_grads
+    return new_state, m_step_grads, loss_batch
 
 
 @jax.jit
@@ -384,17 +384,17 @@ def train_epoch(key, X, state, batch_size, num_e_steps, num_m_steps, lossfn):
     num_batches = len(batch_ixs)
     keys_train = jax.random.split(key_train, num_batches)
 
-    losses = 0
-    m_grads = jax.tree_map(lambda x: x * 0, state.params["params"]["decoder"])
+    total_loss = 0
+    m_grads = jax.tree_map(lambda x: jnp.zeros_like(x), state.params["params"]["decoder"])
     for batch_ix, key_epoch in zip(batch_ixs, keys_train):
-        state, m_step_grads = train_step_batch(
+        state, m_step_grads, loss_batch = train_step_batch(
             key_epoch, X, state, batch_ix, num_e_steps, num_m_steps, lossfn
         )
+        total_loss += loss_batch
         if num_m_steps > 0:
             m_grads = accumulate_grads(m_grads, m_step_grads)
-        loss = jax.jit(lossfn, static_argnums=(2,))(key, state.params, state.apply_fn, X)
     state = m_step(state, m_grads, num_batches)
-    return loss, state
+    return total_loss, state
 
 
 def train_checkpoints(
