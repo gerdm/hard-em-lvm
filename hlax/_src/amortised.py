@@ -1,4 +1,3 @@
-# TODO: Rename to amortised.py
 import jax
 import hlax
 import chex
