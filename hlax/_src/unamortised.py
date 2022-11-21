@@ -96,7 +96,7 @@ def update_pytree(pytree, pytree_subset, ixs):
 
 
 @jax.jit
-def create_state_encoder_batch(state_encoder, ixs):
+def slice_state_encoder_batch(state_encoder, ixs):
     """
     Create a TrainState object for a batch of observations.
     We create this train state with
@@ -143,11 +143,12 @@ def e_step(
     state_encoder: TrainState,
     state_decoder: TrainState,
     lossfn: Callable,
+    key: chex.ArrayDevice,
     X: chex.ArrayDevice
 ):
     params_encoder = state_encoder.params
     params_decoder = state_decoder.params
-    grads_encoder = jax.grad(lossfn, 0)(params_encoder, params_decoder, X)
+    grads_encoder = jax.grad(lossfn, 0)(params_encoder, params_decoder, key, X)
 
     state_encoder = state_encoder.apply_gradients(grads=grads_encoder)
     return state_encoder
@@ -162,45 +163,6 @@ def m_step(state_decoder, grads_decoder, num_batches):
     grads_decoder = jax.tree_map(lambda x: x / num_batches, grads_decoder)
     state_decoder = state_decoder.apply_gradients(grads=grads_decoder)
     return state_decoder
-
-
-@partial(jax.jit, static_argnames=("lossfn",))
-def update_state_batch_em(
-    key: chex.ArrayDevice,
-    X_batch: chex.ArrayDevice,
-    state_batch_encoder: TrainState,
-    state_decoder: TrainState,
-    num_e_steps: int,
-    lossfn: Callable,
-):
-    """
-    Update the train state using the EM algorithm.
-    """
-    apply_fn = state_batch_encoder.apply_fn
-    def part_lossfn(params_encoder, params_decoder, X):
-        params = freeze({
-            "params": {
-                "encoder": params_encoder,
-                "decoder": params_decoder
-            }
-        })
-        return lossfn(key, params, apply_fn, X)
-
-    # E-step
-    part_e_step = partial(
-        e_step,
-        lossfn=part_lossfn,
-        X=X_batch,
-        state_decoder=state_decoder,
-    )
-    state_batch_encoder = jax.lax.fori_loop(0, num_e_steps, part_e_step, state_batch_encoder)
-
-    # M-step preprocessing: Accumulate gradients
-    params_encoder = state_batch_encoder.params
-    params_decoder = state_decoder.params
-    loss_batch, grads_decoder = jax.value_and_grad(part_lossfn, 1)(params_encoder, params_decoder, X_batch)
-
-    return state_batch_encoder, grads_decoder, loss_batch
 
 
 @jax.jit
@@ -238,6 +200,58 @@ def update_reconstruct_state(state, new_params, new_opt_state):
 
 
 @partial(jax.jit, static_argnames=("lossfn",))
+def update_batch_state_encoder(
+    key: chex.ArrayDevice,
+    X_batch: chex.ArrayDevice,
+    state_batch_encoder: TrainState,
+    state_decoder: TrainState,
+    num_e_steps: int,
+    lossfn: Callable,
+):
+    part_e_step = partial(
+        e_step,
+        lossfn=lossfn,
+        X=X_batch,
+        key=key,
+        state_decoder=state_decoder,
+    )
+    state_batch_encoder = jax.lax.fori_loop(0, num_e_steps, part_e_step, state_batch_encoder)
+    return state_batch_encoder
+
+
+@jax.jit
+def update_state_encoder(
+    state_encoder_old: TrainState,
+    state_encoder_batch: TrainState,
+    ixs: chex.ArrayDevice,
+):
+    """
+    Reconstruct full set of unamortised parameters and optimisation
+    state given a batch of parameters and optimisation state.
+    """
+    new_encoder_params = update_pytree(state_encoder_old.params, state_encoder_batch.params, ixs)
+    new_encoder_opt_state = reconstruct_opt_state(state_encoder_old, state_encoder_batch, ixs)
+    state_encoder_new = update_reconstruct_state(state_encoder_old, new_encoder_params, new_encoder_opt_state)
+    return state_encoder_new
+
+
+@partial(jax.jit, static_argnames=("lossfn",))
+def update_state_decoder(
+    key: chex.ArrayDevice,
+    X_batch: chex.ArrayDevice,
+    state_batch_encoder: TrainState,
+    state_decoder: TrainState,
+    lossfn: Callable,
+):
+    params_encoder = state_batch_encoder.params
+    params_decoder = state_decoder.params
+    grad_lossfn = jax.value_and_grad(lossfn, 1)
+    loss_batch, grads_decoder = grad_lossfn(params_encoder, params_decoder, key, X_batch)
+    return loss_batch, grads_decoder
+
+
+
+@partial(jax.jit, static_argnames=("lossfn",))
 def train_step_batch(
     key: chex.ArrayDevice,
     X: chex.ArrayDevice,
@@ -248,15 +262,18 @@ def train_step_batch(
     lossfn: Callable,
 ):
     X_batch = X[ixs]
-    state_encoder_batch = create_state_encoder_batch(state_encoder, ixs)
-    state_encoder_batch, m_step_grads, loss_batch = update_state_batch_em(
+    # E-step
+    state_encoder_batch = slice_state_encoder_batch(state_encoder, ixs)
+    state_encoder_batch = update_batch_state_encoder(
         key, X_batch, state_encoder_batch, state_decoder, num_e_steps, lossfn
     )
+    # M-step (carry gradients)
+    loss_batch, grads_decoder = update_state_decoder(
+        key, X_batch, state_encoder_batch, state_decoder, lossfn
+    )
 
-    new_encoder_params = update_pytree(state_encoder.params, state_encoder_batch.params, ixs)
-    new_encoder_opt_state = reconstruct_opt_state(state_encoder, state_encoder_batch, ixs)
-    new_state_encoder = update_reconstruct_state(state_encoder, new_encoder_params, new_encoder_opt_state)
-    return new_state_encoder, m_step_grads, loss_batch
+    new_state_encoder = update_state_encoder(state_encoder, state_encoder_batch, ixs)
+    return new_state_encoder, grads_decoder, loss_batch
 
 
 @jax.jit
@@ -360,3 +377,13 @@ def train_checkpoints(
         "state_final": (state_encoder, state_decoder)
     }
     return output
+
+
+def train_encoder(
+    key: chex.ArrayDevice,
+    config: Config,
+    X: chex.ArrayDevice,
+    state: TrainState,
+    lossfn: Callable,
+):
+    ...
