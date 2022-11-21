@@ -14,13 +14,13 @@ from flax.training.train_state import TrainState
 
 
 @dataclass
-class TrainConfig:
+class Config:
     num_epochs: int
     batch_size: int
 
 
 @dataclass
-class CheckpointsConfig(TrainConfig):
+class CheckpointsConfig(Config):
     eval_epochs: list
 
 
@@ -153,7 +153,7 @@ def train_epoch(key, state, X, batch_size, lossfn):
 
 def train_encoder(
     key: chex.ArrayDevice,
-    config: TrainConfig,
+    config: Config,
     X: chex.ArrayDevice,
     state: TrainState,
     lossfn: Callable,
@@ -175,9 +175,11 @@ def train_encoder(
 
 def train_checkpoints(
     key: chex.ArrayDevice,
+    model: nn.Module,
     config: CheckpointsConfig,
     X: chex.ArrayDevice,
     lossfn: Callable,
+    tx: optax.GradientTransformation,
 ):
     """
     Find inference model parameters theta at multiple epochs.
@@ -191,12 +193,12 @@ def train_checkpoints(
     keys_train = jax.random.split(key_train, config.num_epochs)
     batch_init = jnp.ones((config.batch_size, *dim_obs))
 
-    params_init = config.model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+    params_init = model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
 
     state = TrainState.create(
-        apply_fn=partial(config.model.apply, num_samples=config.num_is_samples),
+        apply_fn=model.apply,
         params=params_init,
-        tx=config.tx,
+        tx=tx,
         )
 
     time_init = time()
