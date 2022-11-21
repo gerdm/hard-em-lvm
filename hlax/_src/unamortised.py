@@ -252,7 +252,7 @@ def update_state_decoder(
 
 
 @partial(jax.jit, static_argnames=("lossfn",))
-def train_step_batch(
+def train_step(
     key: chex.ArrayDevice,
     X: chex.ArrayDevice,
     state_encoder: TrainState,
@@ -274,6 +274,27 @@ def train_step_batch(
 
     new_state_encoder = update_state_encoder(state_encoder, state_encoder_batch, ixs)
     return new_state_encoder, grads_decoder, loss_batch
+
+
+@partial(jax.jit, static_argnames=("lossfn",))
+def train_step_encoder(
+    key: chex.ArrayDevice,
+    X: chex.ArrayDevice,
+    state_encoder: TrainState,
+    state_decoder: TrainState,
+    ixs: chex.ArrayDevice,
+    num_e_steps: int,
+    lossfn: Callable,
+):
+    X_batch = X[ixs]
+    # E-step
+    state_encoder_batch = slice_state_encoder_batch(state_encoder, ixs)
+    state_encoder_batch = update_batch_state_encoder(
+        key, X_batch, state_encoder_batch, state_decoder, num_e_steps, lossfn
+    )
+
+    new_state_encoder = update_state_encoder(state_encoder, state_encoder_batch, ixs)
+    return new_state_encoder
 
 
 @jax.jit
@@ -301,7 +322,7 @@ def train_epoch(
     total_loss = 0
     m_grads = jax.tree_map(lambda x:  0.0, state_decoder.params)
     for batch_ix, key_epoch in zip(batch_ixs, keys_train):
-        state_encoder, m_step_grads, loss_batch = train_step_batch(
+        state_encoder, m_step_grads, loss_batch = train_step(
             key_epoch, X, state_encoder, state_decoder, batch_ix, num_e_steps, lossfn
         )
         total_loss = loss_batch + total_loss
