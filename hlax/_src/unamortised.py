@@ -292,9 +292,9 @@ def train_step_encoder(
     state_encoder_batch = update_batch_state_encoder(
         key, X_batch, state_encoder_batch, state_decoder, num_e_steps, lossfn
     )
-
+    loss = lossfn(state_encoder_batch.params, state_decoder.params, key, X_batch)
     new_state_encoder = update_state_encoder(state_encoder, state_encoder_batch, ixs)
-    return new_state_encoder
+    return new_state_encoder, loss
 
 
 @jax.jit
@@ -331,6 +331,31 @@ def train_epoch(
     if m_step_update:
         state_decoder = m_step(state_decoder, m_grads, num_batches)
     return total_loss, state_encoder, state_decoder
+
+
+def train_epoch_encoder(
+    key: jnp.ndarray,
+    X: jnp.ndarray,
+    state_encoder: TrainState,
+    state_decoder: TrainState,
+    batch_size: int,
+    num_e_steps: int,
+    lossfn: Callable,
+):
+    num_obs = X.shape[0]
+    key_batch, key_train = jax.random.split(key)
+    batch_ixs = hlax.training.get_batch_train_ixs(key_batch, num_obs, batch_size)
+    num_batches = len(batch_ixs)
+    keys_train = jax.random.split(key_train, num_batches)
+
+    total_loss = 0
+    for batch_ix, key_epoch in zip(batch_ixs, keys_train):
+        state_encoder, loss_batch = train_step_encoder(
+            key_epoch, X, state_encoder, state_decoder, batch_ix, num_e_steps, lossfn
+        )
+        total_loss = loss_batch + total_loss
+    
+    return total_loss, state_encoder
 
 
 def train_checkpoints(
@@ -402,9 +427,43 @@ def train_checkpoints(
 
 def train_encoder(
     key: chex.ArrayDevice,
+    model: nn.Module,
     config: Config,
     X: chex.ArrayDevice,
-    state: TrainState,
+    state_decoder: TrainState,
     lossfn: Callable,
+    tx_encoder: optax.GradientTransformation,
 ):
-    ...
+    hist_loss = []
+    num_obs, *dim_obs = X.shape
+
+    key_params_init, key_eps_init, key_train = jax.random.split(key, 3)
+    keys_train = jax.random.split(key_train, config.num_epochs)
+
+    batch_init = jnp.ones((num_obs, *dim_obs))
+    params_init = model.init(key_params_init, batch_init, key_eps_init, num_samples=3)
+
+    params_encoder_init = params_init["params"]["encoder"]
+
+    state_encoder = TrainState.create(
+        apply_fn=model.apply,
+        params=params_encoder_init,
+        tx=tx_encoder,
+    )
+
+    num_e_steps = config.num_e_steps
+    pbar = tqdm(keys_train)
+    for keyt in pbar:
+        loss, state_encoder = train_epoch_encoder(
+            keyt, X, state_encoder, state_decoder, config.batch_size,
+            num_e_steps, lossfn
+        )
+
+        hist_loss.append(loss)
+        pbar.set_description(f"loss={loss:0.5e}")
+
+    output = {
+        "hist_loss": jnp.array(hist_loss),
+        "state_final": state_encoder
+    }
+    return output
