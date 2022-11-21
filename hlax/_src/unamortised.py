@@ -117,14 +117,6 @@ def create_state_encoder_batch(state_encoder, ixs):
     return state_batch
 
 
-@partial(jax.jit, static_argnames=("lossfn",))
-def update_state_batch(key, X_batch, state_batch, lossfn):
-    loss_valgrad = jax.value_and_grad(lossfn, 1)
-    loss, grads_batch = loss_valgrad(key, state_batch.params, state_batch.apply_fn, X_batch)
-    new_state_batch = state_batch.apply_gradients(grads=grads_batch)
-    return loss, new_state_batch
-
-
 @partial(jax.jit, static_argnames=("entry_name",))
 def adam_replace_opt_state(state, old_mu, old_nu, entry_name):
     opt_state_update = state.opt_state
@@ -290,14 +282,14 @@ def train_epoch(
     keys_train = jax.random.split(key_train, num_batches)
 
     total_loss = 0
-    m_grads = jax.tree_map(lambda x: jnp.zeros_like(x), state_decoder.params)
+    m_grads = jax.tree_map(lambda x:  0.0, state_decoder.params)
     for batch_ix, key_epoch in zip(batch_ixs, keys_train):
         state_encoder, m_step_grads, loss_batch = train_step_batch(
             key_epoch, X, state_encoder, state_decoder, batch_ix, num_e_steps, lossfn
         )
-        total_loss += loss_batch
-        if num_m_steps > 0:
-            m_grads = accumulate_grads(m_grads, m_step_grads)
+        total_loss = loss_batch + total_loss
+        m_grads = accumulate_grads(m_grads, m_step_grads)
+
     state_decoder = m_step(state_decoder, m_grads, num_batches)
     return total_loss, state_encoder, state_decoder
 
