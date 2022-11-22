@@ -28,6 +28,7 @@ class Config:
 class CheckpointsConfig(Config):
     eval_epochs: list
 
+
 def load_config(
     dict_config: Dict,
     model: nn.Module,
@@ -208,6 +209,10 @@ def update_batch_state_encoder(
     num_e_steps: int,
     lossfn: Callable,
 ):
+    """
+    Update the encoder parameters and optimisation state
+    for a batch of observations.
+    """
     part_e_step = partial(
         e_step,
         lossfn=lossfn,
@@ -262,14 +267,15 @@ def train_step(
     lossfn: Callable,
 ):
     X_batch = X[ixs]
+    key_e, key_m = jax.random.split(key)
     # E-step
     state_encoder_batch = slice_state_encoder_batch(state_encoder, ixs)
     state_encoder_batch = update_batch_state_encoder(
-        key, X_batch, state_encoder_batch, state_decoder, num_e_steps, lossfn
+        key_e, X_batch, state_encoder_batch, state_decoder, num_e_steps, lossfn
     )
     # M-step (carry gradients)
     loss_batch, grads_decoder = update_state_decoder(
-        key, X_batch, state_encoder_batch, state_decoder, lossfn
+        key_m, X_batch, state_encoder_batch, state_decoder, lossfn
     )
 
     new_state_encoder = update_state_encoder(state_encoder, state_encoder_batch, ixs)
