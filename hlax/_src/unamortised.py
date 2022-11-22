@@ -311,7 +311,6 @@ def train_epoch(
     batch_size: int,
     num_e_steps: int,
     lossfn: Callable,
-    m_step_update: bool = True,
 ):
     num_obs = X.shape[0]
     key_batch, key_train = jax.random.split(key)
@@ -328,8 +327,7 @@ def train_epoch(
         total_loss = loss_batch + total_loss
         m_grads = accumulate_grads(m_grads, m_step_grads)
     
-    if m_step_update:
-        state_decoder = m_step(state_decoder, m_grads, num_batches)
+    state_decoder = m_step(state_decoder, m_grads, num_batches)
     return total_loss, state_encoder, state_decoder
 
 
@@ -366,7 +364,6 @@ def train_checkpoints(
     lossfn: Callable,
     tx_encoder: optax.GradientTransformation,
     tx_decoder: optax.GradientTransformation,
-    m_step_update: bool = True,
 ):
     """
     Find inference model parameters theta at multiple
@@ -398,12 +395,11 @@ def train_checkpoints(
         tx=tx_decoder,
     )
 
-    num_e_steps = config.num_e_steps
     time_init = time()
     for e, keyt in (pbar := tqdm(enumerate(keys_train), total=config.num_epochs)):
         loss, state_encoder, state_decoder = train_epoch(
             keyt, X, state_encoder, state_decoder, config.batch_size,
-            num_e_steps, lossfn, m_step_update
+            config.num_e_steps, lossfn,
         )
 
         hist_loss.append(loss)
