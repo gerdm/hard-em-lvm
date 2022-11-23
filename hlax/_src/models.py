@@ -232,6 +232,7 @@ class UnamortisedVAEBern(nn.Module):
     obs_dim: int
     Encoder: nn.Module
     Decoder: nn.Module
+    num_samples: int = 1
 
     def reparameterise(self, key, mean, logvar, num_samples=1):
         std = jnp.exp(logvar / 2)
@@ -248,9 +249,9 @@ class UnamortisedVAEBern(nn.Module):
         )(self.latent_dim)
         self.decoder = self.Decoder(self.obs_dim, self.latent_dim)
 
-    def __call__(self, x, key_eps, num_samples=1):
+    def __call__(self, x, key_eps):
         mean_z, logvar_z = self.encoder(x)
-        z = self.reparameterise(key_eps, mean_z, logvar_z, num_samples)
+        z = self.reparameterise(key_eps, mean_z, logvar_z, self.num_samples)
         logit_mean_x = self.decoder(z)
         return z, (mean_z, logvar_z), logit_mean_x
 

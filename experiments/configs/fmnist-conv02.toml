@@ -1,0 +1,22 @@
+# TOML file for a fashion mnist dataset
+[setup]
+dim_latent = 100
+
+[train]
+    num_obs = 10000
+    num_epochs = 100
+    batch_size = 200
+    eval_epochs = [2, 10, 100, 250, 500, 1000]
+    learning_rate = 1e-5 # For VAE and HardEM
+
+    [train.vae]
+        num_is_samples = 10
+    [train.hard_em]
+        num_its_latent = 5 # E-step
+        num_its_params = 5 # M-step
+
+[test]
+    num_obs = 1000
+    num_epochs = 500
+    learning_rate = 1e-6
+    num_is_samples = 10
